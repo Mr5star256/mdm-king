@@ -7671,24 +7671,88 @@ if __name__ == "__main__":
                  fg=COLORS['muted'], bg=COLORS['bg']).pack(pady=(0, 10))
         btn_frame = tk.Frame(_win, bg=COLORS['bg'])
         btn_frame.pack()
+
         def _do_update():
-            _win.destroy()
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else None
+            if not exe_path:
+                return
+            # Replace popup with download progress window
+            _win.geometry('400x160')
+            for w in _win.winfo_children():
+                w.destroy()
+            tk.Label(_win, text='Downloading Update...', font=('Segoe UI', 13, 'bold'),
+                     fg=COLORS['accent'], bg=COLORS['surface']).pack(pady=(16, 4))
+            status_lbl = tk.Label(_win, text=f'v{APP_VERSION} → v{latest}', font=('Segoe UI', 9),
+                     fg=COLORS['fg'], bg=COLORS['bg'])
+            status_lbl.pack(pady=(0, 8))
+            progress_frame = tk.Frame(_win, bg=COLORS['bg'])
+            progress_frame.pack(fill=tk.X, padx=30)
+            progress_bar = tk.Canvas(progress_frame, height=18, bg=COLORS['surface'], highlightthickness=0)
+            progress_bar.pack(fill=tk.X)
+            size_lbl = tk.Label(_win, text='Starting download...', font=('Segoe UI', 8),
+                     fg=COLORS['muted'], bg=COLORS['bg'])
+            size_lbl.pack(pady=(4, 0))
+            cancel_flag = [False]
+
+            def _cancel():
+                cancel_flag[0] = True
+                _win.destroy()
+                login_win.destroy()
+                sys.exit(0)
+            cancel_btn_dl = tk.Button(_win, text='Cancel', font=('Segoe UI', 8),
+                         bg=COLORS['surface'], fg=COLORS['muted'], relief=tk.FLAT,
+                         cursor='hand2', command=_cancel)
+            cancel_btn_dl.pack(pady=(6, 0))
+
             def _dl():
                 try:
-                    exe_path = sys.executable if getattr(sys, 'frozen', False) else None
-                    if not exe_path:
-                        return
                     tmp = exe_path + '.tmp'
-                    urllib.request.urlretrieve(EXE_DOWNLOAD_URL, tmp)
-                    if not os.path.isfile(tmp) or os.path.getsize(tmp) < 1000000:
+                    req = urllib.request.Request(EXE_DOWNLOAD_URL, headers={'User-Agent': 'MDM-King'})
+                    resp = urllib.request.urlopen(req, timeout=30)
+                    total = int(resp.headers.get('Content-Length', 0))
+                    downloaded = 0
+                    block = 65536
+                    with open(tmp, 'wb') as f:
+                        while True:
+                            if cancel_flag[0]:
+                                return
+                            chunk = resp.read(block)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                pct = min(downloaded / total, 1.0)
+                                pw = int(340 * pct)
+                                login_win.after(0, lambda p=pct, d=downloaded, t=total: (
+                                    progress_bar.delete('all'),
+                                    progress_bar.create_rectangle(0, 0, pw, 18, fill=COLORS['accent'], outline=''),
+                                    size_lbl.config(text=f'{d // 1024} / {t // 1024} KB ({int(p*100)}%)')
+                                ))
+                            else:
+                                login_win.after(0, lambda d=downloaded: size_lbl.config(text=f'{d // 1024} KB downloaded'))
+                    if cancel_flag[0]:
+                        if os.path.isfile(tmp):
+                            os.remove(tmp)
                         return
+                    if not os.path.isfile(tmp) or os.path.getsize(tmp) < 1000000:
+                        login_win.after(0, lambda: size_lbl.config(text='Download failed — try again', fg=COLORS['red']))
+                        return
+                    login_win.after(0, lambda: (
+                        status_lbl.config(text='Installing...', fg=COLORS['green']),
+                        size_lbl.config(text='Replacing EXE and restarting...'),
+                        progress_bar.delete('all'),
+                        progress_bar.create_rectangle(0, 0, 340, 18, fill=COLORS['green'], outline='')
+                    ))
                     import shutil
                     shutil.copy2(exe_path, exe_path + '.old')
                     os.replace(tmp, exe_path)
-                    login_win.after(100, lambda: (login_win.destroy(), os.startfile(exe_path)))
-                except Exception:
-                    pass
+                    login_win.after(200, lambda: (login_win.destroy(), os.startfile(exe_path)))
+                except Exception as e:
+                    if not cancel_flag[0]:
+                        login_win.after(0, lambda: size_lbl.config(text=f'Failed: {e}', fg=COLORS['red']))
             threading.Thread(target=_dl, daemon=True).start()
+
         def _do_cancel():
             _win.destroy()
             login_win.destroy()
