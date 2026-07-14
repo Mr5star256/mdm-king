@@ -126,8 +126,8 @@ class AdminPanel:
         root.title('MDM KING — Admin Panel')
         root.configure(bg=BG)
         sw = root.winfo_screenwidth(); sh = root.winfo_screenheight()
-        root.geometry(f'1050x680+{(sw-1050)//2}+{(sh-680)//2}')
-        root.minsize(900, 580)
+        root.geometry(f'860x560+{(sw-860)//2}+{(sh-560)//2}')
+        root.minsize(760, 480)
         try:
             ico = os.path.join(HERE, 'tools', 'mdm_king_logo_circular.ico')
             if os.path.isfile(ico): root.iconbitmap(ico)
@@ -150,32 +150,35 @@ class AdminPanel:
         self._selected_lic = ''
 
         # ── Header ──
-        header = tk.Frame(root, bg=DARK, height=52)
+        header = tk.Frame(root, bg=DARK, height=40)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
-        tk.Label(header, text='MDM KING', font=('Segoe UI', 14, 'bold'),
-                 fg=ACCENT, bg=DARK).pack(side=tk.LEFT, padx=20, pady=10)
+        tk.Label(header, text='MDM KING', font=('Segoe UI', 12, 'bold'),
+                 fg=ACCENT, bg=DARK).pack(side=tk.LEFT, padx=14, pady=6)
+        self._header_stats = tk.Label(header, text='', font=('Segoe UI', 8),
+                                      fg=MUTED, bg=DARK)
+        self._header_stats.pack(side=tk.LEFT, padx=(0, 10), pady=6)
         self._sync_indicator = tk.Label(header, text='●', font=('Segoe UI', 8),
                                         fg=GREEN, bg=DARK)
-        self._sync_indicator.pack(side=tk.RIGHT, padx=(0, 10), pady=10)
-        tk.Label(header, text='Gist Sync Active', font=('Segoe UI', 8),
-                 fg=MUTED, bg=DARK).pack(side=tk.RIGHT, padx=(0, 2), pady=10)
+        self._sync_indicator.pack(side=tk.RIGHT, padx=(0, 8), pady=6)
+        tk.Label(header, text='Cloud Sync', font=('Segoe UI', 8),
+                 fg=MUTED, bg=DARK).pack(side=tk.RIGHT, padx=(0, 2), pady=6)
 
         # ── Tab bar ──
-        tab_bar = tk.Frame(root, bg=BG, height=42)
+        tab_bar = tk.Frame(root, bg=BG, height=36)
         tab_bar.pack(fill=tk.X)
         tab_bar.pack_propagate(False)
         self._tab_bar = tab_bar
 
-        tab_labels = ['Users', 'Licenses', 'Blocklist', 'Sync & Settings']
+        tab_labels = ['Users', 'Licenses', 'Blocklist', 'Settings']
         tab_icons = ['👥', '🔑', '🚫', '⚙️']
         for i, (label, icon) in enumerate(zip(tab_labels, tab_icons)):
-            btn = tk.Label(tab_bar, text=f'  {icon}  {label}  ',
-                           font=('Segoe UI', 10),
+            btn = tk.Label(tab_bar, text=f' {icon} {label} ',
+                           font=('Segoe UI', 9),
                            bg=ACCENT if i == 0 else TAB_INACTIVE,
                            fg='#1e1e2e' if i == 0 else MUTED,
-                           padx=16, pady=6, cursor='hand2')
-            btn.pack(side=tk.LEFT, padx=(0, 3), pady=5)
+                           padx=12, pady=4, cursor='hand2')
+            btn.pack(side=tk.LEFT, padx=(0, 2), pady=4)
             btn.bind('<Button-1>', lambda e, idx=i: self._switch_tab(idx))
             btn.bind('<Enter>', lambda e, b=btn, i=i: self._tab_hover(b, i))
             btn.bind('<Leave>', lambda e, b=btn, i=i: self._tab_leave(b, i))
@@ -183,7 +186,7 @@ class AdminPanel:
 
         # ── Main content area ──
         self._content = tk.Frame(root, bg=BG)
-        self._content.pack(fill=tk.BOTH, expand=True, padx=14, pady=(6, 10))
+        self._content.pack(fill=tk.BOTH, expand=True, padx=10, pady=(4, 6))
 
         self._build_users_tab()
         self._build_licenses_tab()
@@ -191,15 +194,15 @@ class AdminPanel:
         self._build_sync_tab()
 
         # ── Footer status bar ──
-        footer = tk.Frame(root, bg=DARK, height=26)
+        footer = tk.Frame(root, bg=DARK, height=22)
         footer.pack(fill=tk.X, side=tk.BOTTOM)
         footer.pack_propagate(False)
-        self.footer_text = tk.Label(footer, text='Ready', font=('Segoe UI', 8),
+        self.footer_text = tk.Label(footer, text='Ready', font=('Segoe UI', 7),
                                     fg=MUTED, bg=DARK)
-        self.footer_text.pack(side=tk.LEFT, padx=14, pady=2)
-        self.footer_right = tk.Label(footer, text='', font=('Segoe UI', 8),
+        self.footer_text.pack(side=tk.LEFT, padx=10, pady=1)
+        self.footer_right = tk.Label(footer, text='', font=('Segoe UI', 7),
                                      fg=MUTED, bg=DARK)
-        self.footer_right.pack(side=tk.RIGHT, padx=14, pady=2)
+        self.footer_right.pack(side=tk.RIGHT, padx=10, pady=1)
 
         self._switch_tab(0)
         threading.Thread(target=self._sync_down, daemon=True).start()
@@ -229,40 +232,40 @@ class AdminPanel:
     def _card(self, parent, title=None):
         f = tk.Frame(parent, bg=CARD, bd=0, highlightthickness=1,
                      highlightbackground=BORDER, highlightcolor=BORDER)
-        f.pack(fill=tk.BOTH, expand=True, pady=(4, 6))
+        f.pack(fill=tk.BOTH, expand=True, pady=(2, 4))
         if title:
             hdr = tk.Frame(f, bg=CARD)
-            hdr.pack(fill=tk.X, padx=16, pady=(12, 4))
-            tk.Label(hdr, text=title, font=('Segoe UI', 12, 'bold'),
+            hdr.pack(fill=tk.X, padx=12, pady=(8, 2))
+            tk.Label(hdr, text=title, font=('Segoe UI', 10, 'bold'),
                      fg=ACCENT, bg=CARD).pack(side=tk.LEFT)
             sep = tk.Frame(f, bg=BORDER, height=1)
-            sep.pack(fill=tk.X, padx=16, pady=(2, 0))
+            sep.pack(fill=tk.X, padx=12, pady=(2, 0))
         inner = tk.Frame(f, bg=CARD)
-        inner.pack(fill=tk.BOTH, expand=True, padx=16, pady=10)
+        inner.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
         return inner, f
 
     def _section(self, parent, title):
         f = tk.Frame(parent, bg=CARD, bd=0, highlightthickness=1,
                      highlightbackground=BORDER, highlightcolor=BORDER)
-        f.pack(fill=tk.X, pady=3)
+        f.pack(fill=tk.X, pady=2)
         hdr = tk.Frame(f, bg=CARD)
-        hdr.pack(fill=tk.X, padx=12, pady=(6, 2))
-        tk.Label(hdr, text=title, font=('Segoe UI', 9, 'bold'),
+        hdr.pack(fill=tk.X, padx=10, pady=(4, 1))
+        tk.Label(hdr, text=title, font=('Segoe UI', 8, 'bold'),
                  fg=ACCENT2, bg=CARD).pack(side=tk.LEFT)
         inner = tk.Frame(f, bg=CARD)
         inner.pack(fill=tk.X, padx=12, pady=(0, 8))
         return inner
 
-    def _tree(self, parent, cols, height=14):
+    def _tree(self, parent, cols, height=10):
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('Modern.Treeview', background=CARD, foreground=FG,
-                        fieldbackground=CARD, rowheight=32, borderwidth=0,
-                        font=('Segoe UI', 9))
+                        fieldbackground=CARD, rowheight=26, borderwidth=0,
+                        font=('Segoe UI', 8))
         style.map('Modern.Treeview', background=[('selected', ACCENT)],
                   foreground=[('selected', '#1e1e2e')])
         style.configure('Modern.Treeview.Heading', background=SURFACE, foreground=ACCENT,
-                        font=('Segoe UI', 9, 'bold'), borderwidth=0)
+                        font=('Segoe UI', 8, 'bold'), borderwidth=0)
         style.map('Modern.Treeview.Heading', background=[('active', '#1a1a40')])
         style.layout('Modern.Treeview', [('Modern.Treeview.treearea', {'sticky': 'nswe'})])
         style.configure('Vertical.TScrollbar', background=SURFACE, troughcolor=BG,
@@ -272,7 +275,7 @@ class AdminPanel:
                             selectmode='browse', style='Modern.Treeview')
         for c in cols:
             tree.heading(c, text=c.replace('_', ' ').title())
-            tree.column(c, width=120, anchor='center')
+            tree.column(c, width=100, anchor='center')
         vsb = ttk.Scrollbar(parent, orient='vertical', command=tree.yview,
                            style='Vertical.TScrollbar')
         tree.configure(yscrollcommand=vsb.set)
@@ -285,12 +288,12 @@ class AdminPanel:
         fg_color = '#1e1e2e'
         for c in [RED, ORANGE, PINK]:
             if color == c: fg_color = FG; break
-        btn = tk.Button(parent, text=text, font=('Segoe UI', 9, 'bold'),
-                        bg=bg_color, fg=fg_color, bd=0, padx=16, pady=6,
+        btn = tk.Button(parent, text=text, font=('Segoe UI', 8, 'bold'),
+                        bg=bg_color, fg=fg_color, bd=0, padx=10, pady=3,
                         cursor='hand2', command=cmd, relief='flat',
                         activebackground=bg_color, activeforeground=fg_color)
         if width: btn.config(width=width)
-        btn.pack(side=tk.LEFT, padx=4)
+        btn.pack(side=tk.LEFT, padx=2)
         hover_map = {ACCENT: '#7c6ff0', GREEN: '#40e06a', RED: '#e04444',
                      ORANGE: '#e0a060', CYAN: '#70d0c0', YELLOW: '#e0d080',
                      SURFACE: '#1a1a40'}
@@ -304,8 +307,8 @@ class AdminPanel:
         fg_color = '#1e1e2e'
         for c in [RED, ORANGE, PINK]:
             if color == c: fg_color = FG; break
-        btn = tk.Button(parent, text=text, font=('Segoe UI', 8, 'bold'),
-                        bg=bg_color, fg=fg_color, bd=0, padx=10, pady=3,
+        btn = tk.Button(parent, text=text, font=('Segoe UI', 7, 'bold'),
+                        bg=bg_color, fg=fg_color, bd=0, padx=8, pady=2,
                         cursor='hand2', command=cmd, relief='flat')
         btn.pack(side=tk.LEFT, padx=2)
         return btn
@@ -320,26 +323,39 @@ class AdminPanel:
         f = tk.Frame(self._content, bg=BG)
         self._tab_frames.append(f)
 
+        # Search bar
+        sf = tk.Frame(f, bg=BG)
+        sf.pack(fill=tk.X, pady=(2, 4))
+        tk.Label(sf, text='🔍', font=('Segoe UI', 10), fg=MUTED, bg=BG).pack(side=tk.LEFT, padx=(0, 4))
+        self._user_search = tk.Entry(sf, font=('Segoe UI', 9), bg=SURFACE, fg=FG, bd=0,
+                                     highlightthickness=1, highlightcolor=ACCENT,
+                                     highlightbackground=BORDER, insertbackground=FG,
+                                     relief='flat', width=30)
+        self._user_search.pack(side=tk.LEFT, padx=(0, 8))
+        self._user_search.bind('<KeyRelease>', lambda e: self._filter_users())
+        tk.Label(sf, text='Filter by email/status', font=('Segoe UI', 7),
+                 fg=MUTED, bg=BG).pack(side=tk.LEFT)
+
         inner, card = self._card(f, 'Registered Users')
-        self.users_tree = self._tree(inner, ['Email', 'Status', 'HWID', 'License', 'Expires', 'Lic_ID'], height=14)
-        self.users_tree.column('Email', width=200)
-        self.users_tree.column('Status', width=80)
-        self.users_tree.column('HWID', width=140)
-        self.users_tree.column('License', width=80)
-        self.users_tree.column('Expires', width=150)
-        self.users_tree.column('Lic_ID', width=120)
+        self.users_tree = self._tree(inner, ['Email', 'Status', 'HWID', 'License', 'Expires', 'Lic_ID'], height=10)
+        self.users_tree.column('Email', width=180)
+        self.users_tree.column('Status', width=70)
+        self.users_tree.column('HWID', width=120)
+        self.users_tree.column('License', width=70)
+        self.users_tree.column('Expires', width=130)
+        self.users_tree.column('Lic_ID', width=100)
         self.users_tree.bind('<<TreeviewSelect>>', self._on_user_select)
 
         btnf = tk.Frame(f, bg=BG)
-        btnf.pack(pady=4)
-        self._btn(btnf, 'Add User', self._add_user, ACCENT, 14)
-        self._btn(btnf, 'View Details', self._view_user, CYAN, 14)
-        self._btn(btnf, 'Activate + License', self._activate_user, GREEN, 18)
-        self._btn(btnf, 'Deactivate', self._deactivate_user, ORANGE)
-        self._btn(btnf, 'Block User', self._block_user, RED)
-        self._btn(btnf, 'Copy Lic Key', self._copy_lic_key, YELLOW)
-        self._btn(btnf, 'Delete', self._delete_user, RED)
-        self._btn(btnf, 'Refresh', self.refresh_users, SURFACE)
+        btnf.pack(pady=2)
+        self._btn(btnf, 'Add', self._add_user, ACCENT, 8)
+        self._btn(btnf, 'View', self._view_user, CYAN, 8)
+        self._btn(btnf, 'Activate', self._activate_user, GREEN, 12)
+        self._btn(btnf, 'Deactivate', self._deactivate_user, ORANGE, 12)
+        self._btn(btnf, 'Block', self._block_user, RED, 8)
+        self._btn(btnf, 'Copy Key', self._copy_lic_key, YELLOW, 10)
+        self._btn(btnf, 'Delete', self._delete_user, RED, 8)
+        self._btn(btnf, 'Refresh', self.refresh_users, SURFACE, 10)
         self.user_status = self._status(f)
 
     def _on_user_select(self, e):
@@ -351,6 +367,38 @@ class AdminPanel:
             if vals:
                 self._selected_user = vals[0]
                 self._selected_lic_id = vals[5] if len(vals) > 5 else ''
+
+    def _filter_users(self):
+        query = self._user_search.get().strip().lower()
+        try:
+            for i in self.users_tree.get_children():
+                self.users_tree.delete(i)
+        except: return
+        cfg = load_cfg()
+        blocklist = _load_json(BLOCKLIST_PATH)
+        if not isinstance(blocklist, list): blocklist = []
+        blocked_ids = [b.get('lic_id', '') for b in blocklist if isinstance(b, dict)]
+        blocked_hwids = [b.get('hwid', '') for b in blocklist if isinstance(b, dict)]
+        users = {**cfg.get('users', {}), **cfg.get('admin', {})}
+        count = 0
+        for email, data in sorted(users.items()):
+            if not isinstance(data, dict): continue
+            activated = data.get('activated', False)
+            mid = data.get('hwid', '—') or data.get('machine_id', '—') or '—'
+            lic = data.get('license_type', '—') or '—'
+            exp = data.get('expiry', '—') or '—'
+            lid = data.get('license_id', '—') or '—'
+            if mid in blocked_hwids or lid in blocked_ids:
+                status = 'BLOCKED'
+            elif activated:
+                status = 'ACTIVE'
+            else:
+                status = 'PENDING'
+            if query and query not in email.lower() and query not in status.lower():
+                continue
+            self.users_tree.insert('', tk.END, values=(email, status, mid, lic, exp, lid))
+            count += 1
+        self.user_status.config(text=f'{count}/{len(users)} users')
 
     def _view_user(self):
         email = getattr(self, '_selected_user', '')
@@ -662,31 +710,31 @@ class AdminPanel:
         self._tab_frames.append(f)
 
         inner, card = self._card(f, 'All Issued Licenses')
-        self.lic_tree = self._tree(inner, ['Lic_ID', 'HWID', 'Type', 'Created', 'Expires', 'Status'], height=10)
-        self.lic_tree.column('Lic_ID', width=120)
-        self.lic_tree.column('HWID', width=150)
-        self.lic_tree.column('Type', width=80)
-        self.lic_tree.column('Created', width=150)
-        self.lic_tree.column('Expires', width=150)
-        self.lic_tree.column('Status', width=80)
+        self.lic_tree = self._tree(inner, ['Lic_ID', 'HWID', 'Type', 'Created', 'Expires', 'Status'], height=8)
+        self.lic_tree.column('Lic_ID', width=110)
+        self.lic_tree.column('HWID', width=130)
+        self.lic_tree.column('Type', width=70)
+        self.lic_tree.column('Created', width=130)
+        self.lic_tree.column('Expires', width=130)
+        self.lic_tree.column('Status', width=70)
         self.lic_tree.bind('<<TreeviewSelect>>', self._on_lic_select)
 
         cf = self._section(f, 'Create License (Manual)')
         r1 = tk.Frame(cf, bg=CARD)
-        r1.pack(fill=tk.X, pady=2)
-        tk.Label(r1, text='HWID:', font=('Segoe UI', 9), fg=FG, bg=CARD, width=6, anchor='w').pack(side=tk.LEFT)
-        self.lic_hwid = tk.Entry(r1, font=('Consolas', 9), bg=SURFACE, fg=FG, bd=0,
+        r1.pack(fill=tk.X, pady=1)
+        tk.Label(r1, text='HWID:', font=('Segoe UI', 8), fg=FG, bg=CARD, width=5, anchor='w').pack(side=tk.LEFT)
+        self.lic_hwid = tk.Entry(r1, font=('Consolas', 8), bg=SURFACE, fg=FG, bd=0,
                                  highlightthickness=1, highlightcolor=ACCENT,
                                  highlightbackground=BORDER, insertbackground=FG, relief='flat')
-        self.lic_hwid.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        self.lic_hwid.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
         r2 = tk.Frame(cf, bg=CARD)
-        r2.pack(fill=tk.X, pady=2)
-        tk.Label(r2, text='Type:', font=('Segoe UI', 9), fg=FG, bg=CARD, width=6, anchor='w').pack(side=tk.LEFT)
+        r2.pack(fill=tk.X, pady=1)
+        tk.Label(r2, text='Type:', font=('Segoe UI', 8), fg=FG, bg=CARD, width=5, anchor='w').pack(side=tk.LEFT)
         cb = ttk.Combobox(r2, values=['rent', 'month3', 'month6', 'month12'],
-                          state='readonly', font=('Segoe UI', 9))
+                          state='readonly', font=('Segoe UI', 8))
         cb.set('month3')
-        cb.pack(side=tk.LEFT, padx=4)
+        cb.pack(side=tk.LEFT, padx=3)
 
         # Fix: store combobox reference properly
         style = ttk.Style()
@@ -696,17 +744,17 @@ class AdminPanel:
         self.lic_type = cb
 
         r3 = tk.Frame(cf, bg=CARD)
-        r3.pack(pady=4)
-        self._btn(r3, 'Generate', self._manual_generate, ACCENT, 14)
-        self._btn(r3, 'Copy Selected Key', self._copy_lic_key_from_tree, CYAN)
-        self._btn(r3, 'Block', self._block_lic, RED)
-        self._btn(r3, 'Unblock', self._unblock_lic, GREEN)
-        self._btn(r3, 'Delete License', self._delete_license, RED)
+        r3.pack(pady=2)
+        self._btn(r3, 'Generate', self._manual_generate, ACCENT, 12)
+        self._btn(r3, 'Copy Key', self._copy_lic_key_from_tree, CYAN, 10)
+        self._btn(r3, 'Block', self._block_lic, RED, 8)
+        self._btn(r3, 'Unblock', self._unblock_lic, GREEN, 10)
+        self._btn(r3, 'Delete', self._delete_license, RED, 8)
 
-        self.gen_out = tk.Text(cf, font=('Consolas', 8), bg=DARK, fg=GREEN, bd=0,
-                               height=3, relief='flat', wrap='word',
+        self.gen_out = tk.Text(cf, font=('Consolas', 7), bg=DARK, fg=GREEN, bd=0,
+                               height=2, relief='flat', wrap='word',
                                highlightthickness=1, highlightbackground=BORDER)
-        self.gen_out.pack(fill=tk.X, pady=4)
+        self.gen_out.pack(fill=tk.X, pady=2)
 
         self.lic_status = self._status(f)
 
@@ -822,27 +870,27 @@ class AdminPanel:
         self._tab_frames.append(f)
 
         inner, card = self._card(f, 'Blocked Licenses & HWIDs')
-        self.bl_tree = self._tree(inner, ['Type', 'Value', 'Blocked_At'], height=10)
-        self.bl_tree.column('Type', width=100)
-        self.bl_tree.column('Value', width=280)
-        self.bl_tree.column('Blocked_At', width=200)
+        self.bl_tree = self._tree(inner, ['Type', 'Value', 'Blocked_At'], height=8)
+        self.bl_tree.column('Type', width=90)
+        self.bl_tree.column('Value', width=250)
+        self.bl_tree.column('Blocked_At', width=170)
         self.bl_tree.bind('<<TreeviewSelect>>', self._on_bl_select)
 
         hf = self._section(f, 'Block HWID')
         hr = tk.Frame(hf, bg=CARD)
-        hr.pack(fill=tk.X, pady=2)
-        tk.Label(hr, text='HWID:', font=('Segoe UI', 9), fg=FG, bg=CARD, width=6, anchor='w').pack(side=tk.LEFT)
-        self.bl_hwid_entry = tk.Entry(hr, font=('Consolas', 9), bg=SURFACE, fg=FG, bd=0,
+        hr.pack(fill=tk.X, pady=1)
+        tk.Label(hr, text='HWID:', font=('Segoe UI', 8), fg=FG, bg=CARD, width=5, anchor='w').pack(side=tk.LEFT)
+        self.bl_hwid_entry = tk.Entry(hr, font=('Consolas', 8), bg=SURFACE, fg=FG, bd=0,
                                       highlightthickness=1, highlightcolor=ACCENT,
                                       highlightbackground=BORDER, insertbackground=FG, relief='flat')
-        self.bl_hwid_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        self.bl_hwid_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
 
         hb = tk.Frame(hf, bg=CARD)
-        hb.pack(pady=4)
-        self._btn(hb, 'Block HWID', self._block_hwid, RED)
-        self._btn(hb, 'Unblock HWID', self._unblock_hwid, GREEN)
-        self._btn(hb, 'Upload to Gist', self._upload_blocklist, ACCENT)
-        self._btn(hb, 'Delete Selected', self._delete_block_entry, RED)
+        hb.pack(pady=2)
+        self._btn(hb, 'Block HWID', self._block_hwid, RED, 12)
+        self._btn(hb, 'Unblock HWID', self._unblock_hwid, GREEN, 14)
+        self._btn(hb, 'Sync', self._upload_blocklist, ACCENT, 8)
+        self._btn(hb, 'Delete', self._delete_block_entry, RED, 8)
 
         self.bl_status = self._status(f)
 
@@ -900,19 +948,19 @@ class AdminPanel:
         f = tk.Frame(self._content, bg=BG)
         self._tab_frames.append(f)
 
-        inner, card = self._card(f, 'Sync & Settings')
+        inner, card = self._card(f, 'Settings')
 
         # Keypair
         kf = self._section(inner, 'License Keypair')
         has_priv = os.path.isfile(PRIV_PATH)
         has_pub = os.path.isfile(PUB_PATH)
         ready = has_priv and has_pub
-        status_text = 'Ready ✓' if ready else 'Missing — generate one'
+        status_text = 'Ready' if ready else 'Missing'
         color = GREEN if ready else RED
-        tk.Label(kf, text=f'Status: {status_text}', font=('Segoe UI', 10, 'bold'),
-                 fg=color, bg=CARD).pack(anchor='w', pady=2)
+        tk.Label(kf, text=f'Status: {status_text}', font=('Segoe UI', 9, 'bold'),
+                 fg=color, bg=CARD).pack(anchor='w', pady=1)
         btnf = tk.Frame(kf, bg=CARD)
-        btnf.pack(anchor='w', pady=2)
+        btnf.pack(anchor='w', pady=1)
         if not ready:
             self._btn(btnf, 'Generate Keypair', self._gen_keypair, ACCENT)
         else:
@@ -930,25 +978,20 @@ class AdminPanel:
                 if line and 'UUID' not in line:
                     hwid = line; break
         except: hwid = 'unknown'
-        tk.Label(mf, text=f'HWID (Machine UUID): {hwid}', font=('Segoe UI', 10, 'bold'),
-                 fg=ACCENT, bg=CARD).pack(anchor='w', pady=2)
+        tk.Label(mf, text=f'HWID: {hwid}', font=('Segoe UI', 9, 'bold'),
+                 fg=ACCENT, bg=CARD).pack(anchor='w', pady=1)
 
         # Cloudflare Sync
-        gf = self._section(inner, f'Cloudflare Sync — {CLOUDFLARE_API_URL}')
-        cf_status = 'Connected ✓' if sync_download() else 'Check connection'
-        self.sf_label = tk.Label(gf, text=f'Status: {cf_status}', font=('Segoe UI', 10, 'bold'),
-                 fg=GREEN if '✓' in cf_status else RED, bg=CARD)
-        self.sf_label.pack(anchor='w', pady=2)
-        tk.Label(gf, text='Config is stored in Cloudflare KV — globally synced',
-                 font=('Segoe UI', 8), fg=MUTED, bg=CARD).pack(anchor='w')
+        gf = self._section(inner, 'Cloudflare Sync')
+        self.sf_label = tk.Label(gf, text='Ready', font=('Segoe UI', 9, 'bold'),
+                 fg=GREEN, bg=CARD)
+        self.sf_label.pack(anchor='w', pady=1)
         sync_btnf = tk.Frame(gf, bg=CARD)
-        sync_btnf.pack(anchor='w', pady=4)
-        self._btn(sync_btnf, 'Download from Cloudflare', self._sync_down, ACCENT, 24)
-        self._btn(sync_btnf, 'Upload to Cloudflare', self._sync_up, GREEN, 24)
+        sync_btnf.pack(anchor='w', pady=2)
+        self._btn(sync_btnf, 'Download', self._sync_down, ACCENT, 12)
+        self._btn(sync_btnf, 'Upload', self._sync_up, GREEN, 12)
 
         self.sync_status = self._status(inner)
-        tk.Label(inner, text='Changes are auto-uploaded when you Activate/Block users',
-                 font=('Segoe UI', 8), fg=MUTED, bg=CARD).pack()
 
     def _gen_keypair(self):
         try:
@@ -1040,6 +1083,14 @@ class AdminPanel:
                 status = 'PENDING'
             self.users_tree.insert('', tk.END, values=(email, status, mid, lic, exp, lid))
         self.user_status.config(text=f'{len(users)} users')
+        # Update header stats
+        active = sum(1 for e, d in users.items() if isinstance(d, dict) and d.get('activated'))
+        blocked = sum(1 for e, d in users.items() if isinstance(d, dict) and (
+            d.get('machine_id', '') in blocked_hwids or d.get('license_id', '') in blocked_ids))
+        pending = len(users) - active - blocked
+        try:
+            self._header_stats.config(text=f'{len(users)} users | {active} active | {pending} pending | {blocked} blocked')
+        except: pass
 
     def refresh_licenses(self):
         try:
