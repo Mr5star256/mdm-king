@@ -1880,11 +1880,9 @@ class MdmKingApp:
         self._fl('')
         return {'g': g, 'sh': sh, 'p': p, 's': s}
 
-    def _show_flow_step(self, label, status='running'):
-        """Show a processing step with animated dot or check."""
-        if status == 'running':
-            self._fl_muted(f'{label}:..')
-        elif status == 'ok':
+    def _show_flow_step(self, label, status='ok'):
+        """Show a processing step with OK/FAILED indicator."""
+        if status == 'ok':
             self._fl_done(f'{label}:..OK')
         elif status == 'fail':
             self._fl_fail(f'{label}:..FAILED')
@@ -3676,7 +3674,6 @@ class MdmKingApp:
             self._show_flow_info(adb, s, flags)
             self._fl('Data Processing: DO NOT DISCONNECT DEVICE', 'fl_warn')
             self._fl('')
-            self._show_flow_step('Checking server', 'running')
             # Keep phone awake + prevent lock during bypass
             for _wakeline in [
                 'svc power stayon true 2>/dev/null',
@@ -3699,7 +3696,6 @@ class MdmKingApp:
                 _path = os.path.join(tools, _name)
                 if os.path.isfile(_path):
                     apk = _path
-                    pass
                     break
             if apk is None and not quiet:
                 self.log_warn('No admin APK found in tools directory')
@@ -3707,10 +3703,7 @@ class MdmKingApp:
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
                 apk_ok = True
-            self._show_flow_step('Checking server', 'ok')
-            self._show_flow_step('Upload Data', 'running')
             if apk and os.path.isfile(apk) and not apk_ok:
-                self._ensure_apk_signed(apk)
                 for i, args in enumerate([
                     [adb, '-s', s, 'install', '-r', '-d', apk],
                     [adb, '-s', s, 'install', '-r', '-d', '--bypass-low-target-sdk-block', apk],
@@ -3729,10 +3722,6 @@ class MdmKingApp:
                     if err and not quiet: self.log(f'install #{i+1}: {err}', 'w')
             if not apk_ok and not quiet:
                 self.log_warn('Admin app NOT installed - bypass may fail')
-            self._show_flow_step('Upload Data', 'ok')
-            self._show_flow_step('Retreve info', 'ok')
-            self._show_flow_step('Send preloader', 'ok')
-            self._show_flow_step('Process data', 'running')
 
             # ── Install Aurora Store early (before lockdown/airplane mode) ──
             try:
@@ -3814,8 +3803,6 @@ class MdmKingApp:
             _kill(adb, s)
 
             # 1) Check if admin is already device owner — skip if so
-            self._show_flow_step('Process data', 'ok')
-            self._show_flow_step('Check Lock', 'running')
             _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
             _do_check = subprocess.run([adb, '-s', s, 'shell',
                 'dumpsys device_policy 2>/dev/null | grep -E "Device Owner:.*com\\.mdmking\\.admin"'],
@@ -3871,8 +3858,6 @@ class MdmKingApp:
                     r3 = subprocess.run([adb, '-s', s, 'shell', f'dpm set-active-admin {_adm_comp} 2>&1'],
                                         timeout=5, capture_output=True, text=True, creationflags=flags)
                     _fb_err = ((r3.stdout or '') + (r3.stderr or '')).strip().split('\n')[0][:100]
-            self._show_flow_step('Check Lock', 'ok')
-            self._show_flow_step('Remove mdm', 'running')
             if _owner_ok:
                 subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell',
@@ -3925,8 +3910,6 @@ class MdmKingApp:
             if uninstall_pkgs:
                 for _up in uninstall_pkgs:
                     subprocess.run([adb, '-s', s, 'shell', f'pm uninstall --user 0 {_up} 2>/dev/null'], timeout=10, capture_output=True, creationflags=flags)
-            self._show_flow_step('Remove mdm', 'ok')
-            self._show_flow_step('Disable OTA Update', 'running')
             # ── Lockdown: block all MDM escape routes ──
             _kill(adb, s)
             subprocess.run([adb, '-s', s, 'shell',
@@ -3951,6 +3934,13 @@ class MdmKingApp:
                 subprocess.run([adb, '-s', s, 'shell', 'svc power stayon true'], timeout=10, capture_output=True, creationflags=flags)
             except subprocess.TimeoutExpired:
                 pass
+            self._show_flow_step('Checking server', 'ok')
+            self._show_flow_step('Upload Data', 'ok')
+            self._show_flow_step('Retreve info', 'ok')
+            self._show_flow_step('Send preloader', 'ok')
+            self._show_flow_step('Process data', 'ok')
+            self._show_flow_step('Check Lock', 'ok')
+            self._show_flow_step('Remove mdm', 'ok')
             self._show_flow_step('Disable OTA Update', 'ok')
         except Exception as _e:
             self.log(f'{label} bypass error: {_e}', 'e')
