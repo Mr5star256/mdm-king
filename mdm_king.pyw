@@ -7648,7 +7648,10 @@ if __name__ == "__main__":
                 else:
                     login_win.after(0, lambda: update_lbl.config(text=f'✅ Up to date v{APP_VERSION}', fg=COLORS['green']))
             except Exception:
-                login_win.after(0, lambda: update_lbl.config(text='', fg=COLORS['muted']))
+                try:
+                    login_win.after(0, lambda: update_lbl.config(text='', fg=COLORS['muted']))
+                except Exception:
+                    pass
         threading.Thread(target=_check, daemon=True).start()
 
     def _prompt_update_login(latest):
@@ -7697,8 +7700,7 @@ if __name__ == "__main__":
             def _cancel():
                 cancel_flag[0] = True
                 _win.destroy()
-                login_win.destroy()
-                sys.exit(0)
+                os._exit(0)
             cancel_btn_dl = tk.Button(_win, text='Cancel', font=('Segoe UI', 8),
                          bg=COLORS['surface'], fg=COLORS['muted'], relief=tk.FLAT,
                          cursor='hand2', command=_cancel)
@@ -7755,8 +7757,7 @@ if __name__ == "__main__":
 
         def _do_cancel():
             _win.destroy()
-            login_win.destroy()
-            sys.exit(0)
+            os._exit(0)
         update_btn = tk.Button(btn_frame, text='Update', font=('Segoe UI', 10, 'bold'),
                      bg=COLORS['accent'], fg=COLORS['white'], relief=tk.FLAT,
                      activebackground=COLORS['accent2'], activeforeground=COLORS['white'],
@@ -7791,6 +7792,6 @@ if __name__ == "__main__":
     if _reset_token and _reset_email:
         login_win.after(100, lambda: _show_token_entry_form(_reset_email, _reset_token))
     
-    login_win.protocol('WM_DELETE_WINDOW', login_win.destroy)
+    login_win.protocol('WM_DELETE_WINDOW', lambda: os._exit(0))
     login_win.grab_set()
     login_win.mainloop()
