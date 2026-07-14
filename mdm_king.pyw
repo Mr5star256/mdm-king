@@ -1486,6 +1486,20 @@ class MdmKingApp:
         self.log_text.tag_config('sh_p', foreground=self.c['pink'], font=('Segoe UI', 11, 'bold'), spacing1=8, spacing3=4)
         self.log_text.tag_config('sh_o', foreground=self.c['orange'], font=('Segoe UI', 11, 'bold'), spacing1=8, spacing3=4)
         self.log_text.tag_config('sh_e', foreground=self.c['red'], font=('Segoe UI', 11, 'bold'), spacing1=8, spacing3=4)
+
+        # Flow display tags
+        self.log_text.tag_config('fl_hdr', foreground=self.c['accent2'], font=('Consolas', 10, 'bold'))
+        self.log_text.tag_config('fl_ok', foreground=self.c['green'], font=('Consolas', 10, 'bold'))
+        self.log_text.tag_config('fl_val', foreground=self.c['cyan'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_key', foreground=self.c['white'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_muted', foreground=self.c['muted'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_warn', foreground=self.c['orange'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_done', foreground=self.c['green'], font=('Consolas', 10, 'bold'))
+        self.log_text.tag_config('fl_fail', foreground=self.c['red'], font=('Consolas', 10, 'bold'))
+        self.log_text.tag_config('fl_pink', foreground=self.c['pink'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_yellow', foreground=self.c['yellow'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_blue', foreground=self.c['blue'], font=('Consolas', 10))
+        self.log_text.tag_config('fl_purple', foreground=self.c['accent2'], font=('Consolas', 10))
         
         # Bottom status bar with action buttons
         btm = tk.Frame(root, bg=self.c['surface'], height=36)
@@ -1758,7 +1772,125 @@ class MdmKingApp:
         self.log_text.delete(last, last_end)
         self.log_text.insert(tk.END, f'{line.strip()}  ✓\n', 's')
         self.log_text.see(tk.END)
-    
+
+    # ─── Flow display helpers (colored step-by-step output) ───
+    def _fl(self, text, tag='fl_val'):
+        """Insert a single line with tag into log."""
+        self.log_formatted([(text, tag)])
+
+    def _fl_hdr(self, text):
+        self._fl(text, 'fl_hdr')
+
+    def _fl_ok(self, text):
+        self._fl(text, 'fl_ok')
+
+    def _fl_done(self, text):
+        self._fl(text, 'fl_done')
+
+    def _fl_fail(self, text):
+        self._fl(text, 'fl_fail')
+
+    def _fl_warn(self, text):
+        self._fl(text, 'fl_warn')
+
+    def _fl_key(self, text):
+        self._fl(text, 'fl_key')
+
+    def _fl_val(self, text):
+        self._fl(text, 'fl_val')
+
+    def _fl_muted(self, text):
+        self._fl(text, 'fl_muted')
+
+    def _fl_pink(self, text):
+        self._fl(text, 'fl_pink')
+
+    def _fl_yellow(self, text):
+        self._fl(text, 'fl_yellow')
+
+    def _fl_blue(self, text):
+        self._fl(text, 'fl_blue')
+
+    def _fl_purple(self, text):
+        self._fl(text, 'fl_purple')
+
+    def _show_flow_info(self, adb, s, flags=0x08000000):
+        """Display device info in the exact flow format with colored lines."""
+        raw = ''
+        for _attempt in range(3):
+            try:
+                raw = subprocess.run([adb, '-s', s, 'shell', 'getprop'],
+                    capture_output=True, text=True, timeout=15, creationflags=flags).stdout
+                if raw.strip(): break
+            except Exception: pass
+            if _attempt < 2:
+                subprocess.run([adb, 'kill-server'], timeout=5, capture_output=True)
+                subprocess.run([adb, 'start-server'], timeout=10, capture_output=True)
+                time.sleep(2)
+        if not raw.strip():
+            self._fl_fail('Device not responding — check USB connection')
+            return None
+        p = {}
+        for line in raw.split('\n'):
+            if ']: [' in line:
+                k, v = line.strip()[1:].split(']: [', 1)
+                p[k] = v.rstrip(']')
+        def g(*keys):
+            for k in keys:
+                v = p.get(k, '')
+                if v: return v
+                try: v = subprocess.run([adb, '-s', s, 'shell', 'getprop', k],
+                    capture_output=True, text=True, timeout=3, creationflags=flags).stdout.strip()
+                except: pass
+                if v: p[k] = v; return v
+            return ''
+
+        def sh(cmd):
+            try:
+                r = subprocess.run([adb, '-s', s, 'shell', cmd],
+                    capture_output=True, text=True, timeout=5, creationflags=flags)
+                return (r.stdout or '').strip()
+            except: return ''
+
+        # Get network info
+        net_type = g('gsm.network.type') or sh('dumpsys telephony.registry 2>/dev/null | grep -i mNetworkType | cut -d= -f2 | head -1')
+        carrier = g('gsm.operator.alpha') or sh('dumpsys telephony.registry 2>/dev/null | grep -i mOperatorAlphaLong | cut -d= -f2 | head -1')
+        net_str = f'{carrier},{net_type}' if carrier and net_type else (carrier or net_type or '')
+        country = g('persist.sys.country', 'ro.csc.countryiso') or ''
+        country_str = f'{country},{country}' if country else ''
+
+        # ── Device Connected header ──
+        self._fl_hdr('Device Connected:')
+        self._fl_done(f'Check Device State:........✔')
+
+        # ── Device properties (each line different color) ──
+        self._fl_val(f'Model Name:{g("ro.product.model")}')
+        self._fl_blue(f'Device Name:{g("ro.product.device")}')
+        self._fl_yellow(f'Serial:{g("ro.serialno", "sys.serialnumber")}')
+        self._fl_pink(f'Manufacture:{g("ro.product.manufacturer", "ro.product.brand")}')
+        self._fl_purple(f'Platform:{g("ro.chipname", "ro.board.platform", "ro.soc.model")}')
+        self._fl_val(f'Android Version:{g("ro.build.version.release")}')
+        self._fl_blue(f'Sdk Version:{g("ro.build.version.sdk")}')
+        self._fl_yellow(f'Timezone:{g("persist.sys.timezone")}')
+        self._fl_pink(f'Firmware Version:{g("ro.build.display.id")}')
+        self._fl_purple(f'Build Id:{g("ro.build.id")}')
+        self._fl_val(f'Security Patch:{g("ro.build.version.security_patch")}')
+        self._fl_blue(f'Country:{country_str}')
+        self._fl_yellow(f'Network Type:{net_str}')
+        self._fl('')
+        return {'g': g, 'sh': sh, 'p': p, 's': s}
+
+    def _show_flow_step(self, label, status='running'):
+        """Show a processing step with animated dot or check."""
+        if status == 'running':
+            self._fl_muted(f'{label}:..')
+        elif status == 'ok':
+            self._fl_done(f'{label}:..OK')
+        elif status == 'fail':
+            self._fl_fail(f'{label}:..FAILED')
+        elif status == 'warn':
+            self._fl_warn(f'{label}:..WARN')
+
     def _log_context_menu(self, event):
         self._log_menu.tk_popup(event.x_root, event.y_root)
     
@@ -3543,22 +3675,10 @@ class MdmKingApp:
             if btemp: cs.append(('🌡ï¸', 'Temp', str(int(int(btemp.split(':')[1].strip()) / 10)) + '°C' if ':' in btemp else '', None))
             mem = gx('dumpsys meminfo 2>/dev/null | grep -i "total ram:" | head -1')
             if mem: cs.append(('💿', 'RAM', mem.split(':')[1].strip() if ':' in mem else mem, None))
-            self.log('Device Connected:', 'h')
-            self.log(f'Check Device State:........{"✔" if s else "✘"}', 's')
-            self.log(f'Model Name:{g("ro.product.model"):>26}', 'i')
-            self.log(f'Device Name:{g("ro.product.device"):>24}', 'i')
-            self.log(f'Serial:{g("ro.serialno", "sys.serialnumber"):>28}', 'i')
-            self.log(f'Manufacture:{g("ro.product.manufacturer", "ro.product.brand"):>23}', 'i')
-            self.log(f'Platform:{g("ro.board.platform", "ro.chipname"):>26}', 'i')
-            self.log(f'Android Version:{g("ro.build.version.release"):>19}', 'i')
-            self.log(f'Sdk Version:{g("ro.build.version.sdk"):>22}', 'i')
-            self.log(f'Timezone:{g("persist.sys.timezone"):>25}', 'i')
-            self.log(f'Firmware Version:{g("ro.build.display.id"):>18}', 'i')
-            self.log(f'Build Id:{g("ro.build.id"):>25}', 'i')
-            self.log(f'Security Patch:{g("ro.build.version.security_patch"):>19}', 'i')
-            self.log(f'Country:{g("persist.sys.country", "ro.csc.countryiso"):>25}', 'i')
-            self.log(f'Network Type:{g("gsm.network.type"):>22}', 'i')
-            self.log_blank()
+            self._show_flow_info(adb, s, flags)
+            self._fl('Data Processing: DO NOT DISCONNECT DEVICE', 'fl_warn')
+            self._fl('')
+            self._show_flow_step('Checking server', 'running')
             # Keep phone awake + prevent lock during bypass
             for _wakeline in [
                 'svc power stayon true 2>/dev/null',
@@ -3589,6 +3709,8 @@ class MdmKingApp:
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
                 apk_ok = True
+            self._show_flow_step('Checking server', 'ok')
+            self._show_flow_step('Upload Data', 'running')
             if apk and os.path.isfile(apk) and not apk_ok:
                 self._ensure_apk_signed(apk)
                 for i, args in enumerate([
@@ -3609,6 +3731,10 @@ class MdmKingApp:
                     if err and not quiet: self.log(f'install #{i+1}: {err}', 'w')
             if not apk_ok and not quiet:
                 self.log_warn('Admin app NOT installed - bypass may fail')
+            self._show_flow_step('Upload Data', 'ok')
+            self._show_flow_step('Retreve info', 'ok')
+            self._show_flow_step('Send preloader', 'ok')
+            self._show_flow_step('Process data', 'running')
 
             # ── Install Aurora Store early (before lockdown/airplane mode) ──
             try:
@@ -3690,6 +3816,8 @@ class MdmKingApp:
             _kill(adb, s)
 
             # 1) Check if admin is already device owner — skip if so
+            self._show_flow_step('Process data', 'ok')
+            self._show_flow_step('Check Lock', 'running')
             _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
             _do_check = subprocess.run([adb, '-s', s, 'shell',
                 'dumpsys device_policy 2>/dev/null | grep -E "Device Owner:.*com\\.mdmking\\.admin"'],
@@ -3745,6 +3873,8 @@ class MdmKingApp:
                     r3 = subprocess.run([adb, '-s', s, 'shell', f'dpm set-active-admin {_adm_comp} 2>&1'],
                                         timeout=5, capture_output=True, text=True, creationflags=flags)
                     _fb_err = ((r3.stdout or '') + (r3.stderr or '')).strip().split('\n')[0][:100]
+            self._show_flow_step('Check Lock', 'ok')
+            self._show_flow_step('Remove mdm', 'running')
             if _owner_ok:
                 subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell',
@@ -3797,6 +3927,8 @@ class MdmKingApp:
             if uninstall_pkgs:
                 for _up in uninstall_pkgs:
                     subprocess.run([adb, '-s', s, 'shell', f'pm uninstall --user 0 {_up} 2>/dev/null'], timeout=10, capture_output=True, creationflags=flags)
+            self._show_flow_step('Remove mdm', 'ok')
+            self._show_flow_step('Disable OTA Update', 'running')
             # ── Lockdown: block all MDM escape routes ──
             _kill(adb, s)
             subprocess.run([adb, '-s', s, 'shell',
@@ -3821,6 +3953,7 @@ class MdmKingApp:
                 subprocess.run([adb, '-s', s, 'shell', 'svc power stayon true'], timeout=10, capture_output=True, creationflags=flags)
             except subprocess.TimeoutExpired:
                 pass
+            self._show_flow_step('Disable OTA Update', 'ok')
         except Exception as _e:
             self.log(f'{label} bypass error: {_e}', 'e')
             import traceback as _tb
