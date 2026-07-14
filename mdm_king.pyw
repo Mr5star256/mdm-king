@@ -7636,17 +7636,19 @@ if __name__ == "__main__":
     # Start update check after splash closes
     def _login_update_check():
         import urllib.request, json
-        try:
-            update_lbl.config(text='🔍 Checking for updates...', fg=COLORS['yellow'])
-            req = urllib.request.Request(VERSION_URL, headers={'User-Agent': 'MDM-King'})
-            resp = urllib.request.urlopen(req, timeout=5)
-            latest = resp.read().decode('utf-8').strip()
-            if _semver_gt(latest, APP_VERSION):
-                login_win.after(500, lambda: _prompt_update_login(latest))
-            else:
-                login_win.after(0, lambda: update_lbl.config(text=f'✅ Up to date v{APP_VERSION}', fg=COLORS['green']))
-        except Exception:
-            login_win.after(0, lambda: update_lbl.config(text='', fg=COLORS['muted']))
+        def _check():
+            try:
+                login_win.after(0, lambda: update_lbl.config(text='🔍 Checking for updates...', fg=COLORS['yellow']))
+                req = urllib.request.Request(VERSION_URL, headers={'User-Agent': 'MDM-King'})
+                resp = urllib.request.urlopen(req, timeout=5)
+                latest = resp.read().decode('utf-8').strip()
+                if _semver_gt(latest, APP_VERSION):
+                    login_win.after(500, lambda: _prompt_update_login(latest))
+                else:
+                    login_win.after(0, lambda: update_lbl.config(text=f'✅ Up to date v{APP_VERSION}', fg=COLORS['green']))
+            except Exception:
+                login_win.after(0, lambda: update_lbl.config(text='', fg=COLORS['muted']))
+        threading.Thread(target=_check, daemon=True).start()
 
     def _prompt_update_login(latest):
         _win = tk.Toplevel(login_win)
