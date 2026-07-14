@@ -3311,7 +3311,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'MDM APP BYPASS COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MDM App bypass complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'MDM App bypass error: {_e}', 'e')
             import traceback as _tb
@@ -3457,7 +3456,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'NOKIA BYPASS COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — Nokia bypass complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'Error: {_e}', 'e')
             import traceback as _tb
@@ -4110,7 +4108,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'SPD BYPASS NEW METHOD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — SPD Bypass New Method complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'SPD bypass error: {_e}', 'e')
             import traceback as _tb
@@ -4140,7 +4137,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'MTK BYPASS NEW METHOD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MTK Bypass New Method complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'MTK bypass error: {_e}', 'e')
             import traceback as _tb
@@ -4171,7 +4167,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'MTK BYPASS 2024 COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MTK Bypass 2024 complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'MTK 2024 bypass error: {_e}', 'e')
             import traceback as _tb
@@ -6687,7 +6682,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, 'UNIVERSAL BYPASS OLD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — Universal Bypass Old complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'Universal bypass error: {_e}', 'e')
             import traceback as _tb
@@ -6720,7 +6714,6 @@ class MdmKingApp:
             self.root.after(0, lambda: self._finish_progress(True, f'{brand} IT ADMIN BYPASS COMPLETE'))
             self.root.after(0, lambda: self.status_var.set(f'Done — {brand} IT admin bypass complete'))
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
-            self._open_package_freeze(adb, s)
         except Exception as _e:
             self.log(f'{brand} IT Admin error: {_e}', 'e')
             try: self.root.after(0, lambda: self._finish_progress(False, f'{brand} bypass failed'))
