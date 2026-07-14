@@ -1169,7 +1169,7 @@ COLORS = {
 
 
 APP_VERSION = "0.3.1"
-VERSION_URL = "https://raw.githubusercontent.com/Mr5star256/mdm-king/main/version.txt"
+VERSION_URL = "https://api.github.com/repos/Mr5star256/mdm-king/releases/latest"
 EXE_DOWNLOAD_URL = "https://github.com/Mr5star256/mdm-king/releases/latest/download/mdm_king.exe"
 
 
@@ -7639,10 +7639,11 @@ if __name__ == "__main__":
         def _check():
             try:
                 login_win.after(0, lambda: update_lbl.config(text='🔍 Checking for updates...', fg=COLORS['yellow']))
-                req = urllib.request.Request(VERSION_URL, headers={'User-Agent': 'MDM-King'})
-                resp = urllib.request.urlopen(req, timeout=5)
-                latest = resp.read().decode('utf-8').strip()
-                if _semver_gt(latest, APP_VERSION):
+                req = urllib.request.Request(VERSION_URL, headers={'User-Agent': 'MDM-King', 'Accept': 'application/vnd.github.v3+json'})
+                resp = urllib.request.urlopen(req, timeout=8)
+                data = json.loads(resp.read().decode('utf-8'))
+                latest = data.get('tag_name', '').lstrip('v').strip()
+                if latest and _semver_gt(latest, APP_VERSION):
                     login_win.after(500, lambda: _prompt_update_login(latest))
                 else:
                     login_win.after(0, lambda: update_lbl.config(text=f'✅ Up to date v{APP_VERSION}', fg=COLORS['green']))
