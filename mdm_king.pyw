@@ -1168,7 +1168,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 VERSION_URL = "https://raw.githubusercontent.com/Mr5star256/mdm-king/main/version.txt"
 EXE_DOWNLOAD_URL = "https://github.com/Mr5star256/mdm-king/releases/latest/download/mdm_king.exe"
 
