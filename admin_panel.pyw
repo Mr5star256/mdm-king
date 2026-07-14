@@ -525,6 +525,7 @@ class AdminPanel:
             save_cfg(cfg)
             win.destroy()
             self.refresh_users()
+            threading.Thread(target=sync_upload, daemon=True).start()
 
         btnf = tk.Frame(win, bg=BG)
         btnf.pack(pady=16)
@@ -1062,6 +1063,9 @@ class AdminPanel:
         try:
             for i in self.users_tree.get_children(): self.users_tree.delete(i)
         except: return
+        try:
+            sync_download()
+        except: pass
         cfg = load_cfg()
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
@@ -1096,6 +1100,9 @@ class AdminPanel:
         try:
             for i in self.lic_tree.get_children(): self.lic_tree.delete(i)
         except: return
+        try:
+            sync_download()
+        except: pass
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         blocked_ids = [b.get('lic_id', '') for b in blocklist if isinstance(b, dict)]
@@ -1112,6 +1119,9 @@ class AdminPanel:
         try:
             for i in self.bl_tree.get_children(): self.bl_tree.delete(i)
         except: return
+        try:
+            sync_download()
+        except: pass
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         for b in blocklist:
