@@ -6,16 +6,9 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('tools\\platform-tools\\adb.exe', 'tools\\platform-tools'),
-        ('tools\\platform-tools\\AdbWinApi.dll', 'tools\\platform-tools'),
-        ('tools\\platform-tools\\AdbWinUsbApi.dll', 'tools\\platform-tools'),
-        ('tools\\simg2img.exe', 'tools'),
-        ('tools\\img2simg.exe', 'tools'),
-        ('tools\\lpmake.exe', 'tools'),
-        ('tools\\mdm_king_admin.apk', 'tools'),
-        ('tools\\mdm_king_admin_signed.apk', 'tools'),
-        ('tools\\aurora-clean.apk', 'tools'),
-        ('tools\\aurora-store.apk', 'tools'),
+        # Logos kept bundled (tiny UI assets); all functional tools (adb, simg2img,
+        # lpmake, admin/aurora APKs, BusyBox, SPD driver) are fetched at runtime from
+        # Cloudflare R2 via init_cloudflare_assets() -> /download/tools.zip
         ('tools\\mdm_king_logo_circular.ico', 'tools'),
         ('tools\\mdm_king_logo_circular_32.png', 'tools'),
         ('tools\\mdm_king_logo_circular.png', 'tools'),
@@ -38,7 +31,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MDM KING v0.3.7',
+    name='MDM KING v0.3.8',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

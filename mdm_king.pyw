@@ -1473,7 +1473,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.7"
+APP_VERSION = "0.3.8"
 VERSION_URL = CLOUDFLARE_API_URL + "/download/version.txt"
 EXE_DOWNLOAD_URL = CLOUDFLARE_API_URL + "/download/mdm_king.exe"
 
