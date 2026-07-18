@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 MDM KING — Admin Panel v3 (Modern UI)
-Synchronised with mdm_king.py via config.json + license_data/
+Pure Cloudflare config — no local config.json.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import json, os, sys, datetime, threading, urllib.request, base64, uuid, hashlib
-from cloudflare import CLOUDFLARE_API_URL, fetch_config, update_config
+from cloudflare import CLOUDFLARE_API_URL, fetch_config, update_config, get_user, patch_user, delete_user, get_all_users, get_blocklist, update_blocklist
 
 try:
     import ctypes
@@ -14,10 +14,10 @@ try:
 except: pass
 
 HERE = os.path.dirname(os.path.dirname(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-CFG_PATH = os.path.join(HERE, 'config.json')
 LICENSE_DATA = os.path.join(HERE, 'license_data')
 LICENSES_PATH = os.path.join(LICENSE_DATA, 'licenses.json')
 BLOCKLIST_PATH = os.path.join(LICENSE_DATA, 'blocklist.json')
+D1_LICENSES_PATH = os.path.join(LICENSE_DATA, 'd1_licenses.json')
 PRIV_PATH = os.path.join(LICENSE_DATA, 'private.pem')
 PUB_PATH = os.path.join(LICENSE_DATA, 'public.pem')
 
@@ -36,64 +36,25 @@ def _load_json(path):
 def _save_json(path, data):
     with open(path, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
 
+# ── Pure Cloudflare helpers ──
 def load_cfg():
-    try:
-        with open(CFG_PATH, encoding='utf-8') as f: return json.load(f)
-    except: return {}
-
-_sync_lock = threading.Lock()
+    return fetch_config() or {}
 
 def save_cfg(cfg):
-    try:
-        with open(CFG_PATH, 'w', encoding='utf-8') as f: json.dump(cfg, f, indent=2)
-    except Exception as e:
-        print(f'save_cfg error: {e}')
+    update_config(cfg)
 
-def sync_download():
-    if not _sync_lock.acquire(blocking=False):
-        print('Sync already in progress')
-        return False
+def _d1_request(method, path, data=None):
+    admin_token = 'admin_UrqbgE1A2zdWpIvoYBTVFieNL7O3P0Sy'
+    url = CLOUDFLARE_API_URL + path + '?token=' + admin_token
+    body = json.dumps(data).encode() if data else None
+    req = urllib.request.Request(url, data=body, headers={
+        'User-Agent': 'MDM-King', 'Content-Type': 'application/json'
+    }, method=method)
     try:
-        remote = fetch_config()
-        if not remote:
-            return False
-        local = load_cfg()
-        deleted = set(local.get('deleted_users', []))
-        for u, d in remote.get('users', {}).items():
-            if u in deleted: continue
-            local.setdefault('users', {})
-            if u not in local['users']:
-                local['users'][u] = d
-            else:
-                for k, v in d.items():
-                    if k not in ('password',):
-                        local['users'][u][k] = v
-        for key in ('admin', 'blocklist', 'features', 'options', 'smtp'):
-            if key in remote:
-                local[key] = remote[key]
-        save_cfg(local)
-        return True
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode('utf-8'))
     except Exception as e:
-        import traceback
-        print(f'Sync download failed: {e}')
-        traceback.print_exc()
-        return False
-    finally:
-        _sync_lock.release()
-
-def sync_upload():
-    if not _sync_lock.acquire(blocking=False):
-        print('Sync upload already in progress')
-        return False
-    try:
-        cfg = load_cfg()
-        ok = update_config(cfg)
-        return ok is not None
-    except Exception as e:
-        print(f'Sync upload failed: {e}')
-        return False
-    finally:
-        _sync_lock.release()
+        return {'error': str(e)}
 
 # ── Cyberpunk Neon Theme ──
 BG = '#0d001a'
@@ -362,11 +323,18 @@ class AdminPanel:
         sel = self.users_tree.selection()
         self._selected_user = ''
         self._selected_lic_id = ''
+        self._selected_is_d1 = False
+        self._selected_username = ''
         if sel:
             vals = self.users_tree.item(sel[0], 'values')
             if vals:
                 self._selected_user = vals[0]
                 self._selected_lic_id = vals[5] if len(vals) > 5 else ''
+                # Check if D1 user
+                d1_emails = getattr(self, '_d1_emails', {})
+                if self._selected_user in d1_emails:
+                    self._selected_is_d1 = True
+                    self._selected_username = d1_emails[self._selected_user]
 
     def _filter_users(self):
         query = self._user_search.get().strip().lower()
@@ -391,7 +359,18 @@ class AdminPanel:
             if mid in blocked_hwids or lid in blocked_ids:
                 status = 'BLOCKED'
             elif activated:
-                status = 'ACTIVE'
+                exp = data.get('expiry', '')
+                if exp and exp != '—':
+                    try:
+                        exp_dt = datetime.datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                        if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                            status = 'EXPIRED'
+                        else:
+                            status = 'ACTIVE'
+                    except Exception:
+                        status = 'ACTIVE'
+                else:
+                    status = 'ACTIVE'
             else:
                 status = 'PENDING'
             if query and query not in email.lower() and query not in status.lower():
@@ -436,8 +415,22 @@ class AdminPanel:
             status = 'BLOCKED'
             status_color = RED
         elif data.get('activated', False):
-            status = 'ACTIVE'
-            status_color = GREEN
+            exp = data.get('expiry', '')
+            if exp and exp != '—':
+                try:
+                    exp_dt = datetime.datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                    if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                        status = 'EXPIRED'
+                        status_color = RED
+                    else:
+                        status = 'ACTIVE'
+                        status_color = GREEN
+                except Exception:
+                    status = 'ACTIVE'
+                    status_color = GREEN
+            else:
+                status = 'ACTIVE'
+                status_color = GREEN
         else:
             status = 'PENDING'
             status_color = ORANGE
@@ -525,7 +518,6 @@ class AdminPanel:
             save_cfg(cfg)
             win.destroy()
             self.refresh_users()
-            threading.Thread(target=sync_upload, daemon=True).start()
 
         btnf = tk.Frame(win, bg=BG)
         btnf.pack(pady=16)
@@ -542,6 +534,7 @@ class AdminPanel:
         if not os.path.isfile(PRIV_PATH):
             messagebox.showerror('No Keypair', 'Go to Settings tab and generate a keypair first')
             return
+        is_d1 = getattr(self, '_selected_is_d1', False)
         dur_win = tk.Toplevel(self.root)
         dur_win.withdraw()
         dur_win.title('Select License Duration')
@@ -570,11 +563,14 @@ class AdminPanel:
             dur_label = var.get()
             typ_key, days = DURATIONS[dur_label]
             email = self._selected_user
-            cfg = load_cfg()
-            section = 'admin' if email in cfg.get('admin', {}) else 'users'
-            user_data = cfg.get(section, {}).get(email, {})
-            if not isinstance(user_data, dict): user_data = {}
-            hwid = user_data.get('machine_id', '')
+            # D1 users have no local hwid — use empty
+            hwid = ''
+            if not is_d1:
+                cfg = load_cfg()
+                section = 'admin' if email in cfg.get('admin', {}) else 'users'
+                user_data = cfg.get(section, {}).get(email, {})
+                if isinstance(user_data, dict):
+                    hwid = user_data.get('machine_id', '')
             try:
                 from cryptography.hazmat.primitives import hashes, serialization
                 from cryptography.hazmat.primitives.asymmetric import padding
@@ -600,20 +596,39 @@ class AdminPanel:
             licenses = _load_json(LICENSES_PATH)
             licenses[lic_id] = {**payload, 'active': True}
             _save_json(LICENSES_PATH, licenses)
-            user_data['activated'] = True
-            user_data['license_key'] = lic_key
-            user_data['license_id'] = lic_id
-            user_data['license_type'] = typ_key
-            user_data['expiry'] = expires.strftime('%Y-%m-%dT%H:%M:%SZ')
-            cfg[section][email] = user_data
-            save_cfg(cfg)
+            # D1 user — also activate in D1
+            if is_d1:
+                username = getattr(self, '_selected_username', email)
+                _d1_request('POST', '/admin/activate-user', {
+                    'username': username,
+                    'activated': True,
+                    'license_expiry': expires.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'license_type': typ_key,
+                })
+                # Save license info locally for display
+                d1_lics = _load_json(D1_LICENSES_PATH)
+                if not isinstance(d1_lics, dict): d1_lics = {}
+                d1_lics[email] = {
+                    'license_key': lic_key,
+                    'license_id': lic_id,
+                    'license_type': typ_key,
+                    'expiry': expires.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                }
+                _save_json(D1_LICENSES_PATH, d1_lics)
+            else:
+                user_data['activated'] = True
+                user_data['license_key'] = lic_key
+                user_data['license_id'] = lic_id
+                user_data['license_type'] = typ_key
+                user_data['expiry'] = expires.strftime('%Y-%m-%dT%H:%M:%SZ')
+                cfg[section][email] = user_data
+                save_cfg(cfg)
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(lic_key)
             except: pass
             dur_win.destroy()
             self.refresh_users()
-            threading.Thread(target=sync_upload, daemon=True).start()
 
         btnf = tk.Frame(dur_win, bg=BG)
         btnf.pack(pady=14)
@@ -626,6 +641,16 @@ class AdminPanel:
 
     def _deactivate_user(self):
         if not getattr(self, '_selected_user', ''): return
+        # D1 user
+        if getattr(self, '_selected_is_d1', False):
+            username = getattr(self, '_selected_username', self._selected_user)
+            result = _d1_request('POST', '/admin/activate-user', {'username': username, 'activated': False})
+            if result and result.get('ok'):
+                messagebox.showinfo('Deactivated', f'{username} has been deactivated.')
+            else:
+                messagebox.showerror('Error', result.get('error', 'Deactivation failed'))
+            self.refresh_users()
+            return
         cfg = load_cfg()
         email = self._selected_user
         section = 'admin' if email in cfg.get('admin', {}) else 'users'
@@ -634,7 +659,6 @@ class AdminPanel:
             users[email]['activated'] = False
             save_cfg(cfg)
             self.refresh_users()
-            threading.Thread(target=sync_upload, daemon=True).start()
 
     def _block_user(self):
         if not getattr(self, '_selected_user', ''): return
@@ -670,7 +694,6 @@ class AdminPanel:
                 _save_json(LICENSES_PATH, licenses)
         self.refresh_users()
         self.refresh_blocklist()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _copy_lic_key(self):
         if not getattr(self, '_selected_user', ''): return
@@ -688,8 +711,18 @@ class AdminPanel:
     def _delete_user(self):
         if not getattr(self, '_selected_user', ''): return
         if not messagebox.askyesno('Confirm Delete', f'Permanently delete {self._selected_user}?\n\nThis cannot be undone.'): return
-        cfg = load_cfg()
         email = self._selected_user
+        # Check if D1 user
+        if getattr(self, '_selected_is_d1', False):
+            username = getattr(self, '_selected_username', email)
+            result = _d1_request('DELETE', f'/admin/delete-user/{username}')
+            if result and result.get('ok'):
+                messagebox.showinfo('Deleted', f'{username} deleted from database.')
+            else:
+                messagebox.showerror('Error', result.get('error', 'Delete failed'))
+            self.refresh_users()
+            return
+        cfg = load_cfg()
         section = 'admin' if email in cfg.get('admin', {}) else 'users'
         users = cfg.get(section, {})
         user_data = users.get(email, {})
@@ -703,7 +736,6 @@ class AdminPanel:
         cfg.setdefault('deleted_users', []).append(email)
         save_cfg(cfg)
         self.refresh_users()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     # ═══════════════ TAB 2: LICENSES ═══════════════
     def _build_licenses_tab(self):
@@ -829,7 +861,6 @@ class AdminPanel:
         if lid in licenses: licenses[lid]['active'] = False; _save_json(LICENSES_PATH, licenses)
         self.refresh_licenses()
         self.refresh_users()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _unblock_lic(self):
         if not getattr(self, '_selected_lic', ''): return
@@ -842,7 +873,6 @@ class AdminPanel:
         if lid in licenses: licenses[lid]['active'] = True; _save_json(LICENSES_PATH, licenses)
         self.refresh_licenses()
         self.refresh_users()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _delete_license(self):
         if not getattr(self, '_selected_lic', ''): return
@@ -863,7 +893,6 @@ class AdminPanel:
         save_cfg(cfg)
         self.refresh_licenses()
         self.refresh_users()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     # ═══════════════ TAB 3: BLOCKLIST ═══════════════
     def _build_blocklist_tab(self):
@@ -911,7 +940,6 @@ class AdminPanel:
         blocklist = [b for b in blocklist if not (isinstance(b, dict) and (b.get('hwid') == val or b.get('lic_id') == val))]
         _save_json(BLOCKLIST_PATH, blocklist)
         self.refresh_blocklist()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _block_hwid(self):
         hwid = self.bl_hwid_entry.get().strip()
@@ -923,7 +951,6 @@ class AdminPanel:
         blocklist.append({'hwid': hwid, 'blocked_at': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')})
         _save_json(BLOCKLIST_PATH, blocklist)
         self.refresh_blocklist()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _unblock_hwid(self):
         hwid = self.bl_hwid_entry.get().strip()
@@ -933,7 +960,6 @@ class AdminPanel:
         blocklist = [b for b in blocklist if not (isinstance(b, dict) and b.get('hwid') == hwid)]
         _save_json(BLOCKLIST_PATH, blocklist)
         self.refresh_blocklist()
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     def _upload_blocklist(self):
         blocklist = _load_json(BLOCKLIST_PATH)
@@ -942,7 +968,6 @@ class AdminPanel:
         cfg['blocklist'] = {'hwids': [b['hwid'] for b in blocklist if isinstance(b, dict) and 'hwid' in b],
                             'ids': [b['lic_id'] for b in blocklist if isinstance(b, dict) and 'lic_id' in b]}
         save_cfg(cfg)
-        threading.Thread(target=sync_upload, daemon=True).start()
 
     # ═══════════════ TAB 4: SYNC & SETTINGS ═══════════════
     def _build_sync_tab(self):
@@ -1035,8 +1060,9 @@ class AdminPanel:
         self._switch_tab(old_idx if old_idx < len(self._tab_frames) else 0)
 
     def _sync_down(self):
-        self.footer_text.config(text='Downloading from Cloudflare...')
-        ok = sync_download()
+        self.root.after(0, lambda: self.footer_text.config(text='Downloading from Cloudflare...'))
+        cfg = load_cfg()
+        ok = bool(cfg)
         self.root.after(0, lambda: (
             self.sync_status.config(text='Downloaded from Cloudflare ✓' if ok else 'Download failed',
                                     fg=GREEN if ok else RED),
@@ -1045,8 +1071,9 @@ class AdminPanel:
         ))
 
     def _sync_up(self):
-        self.footer_text.config(text='Uploading to Cloudflare...')
-        ok = sync_upload()
+        self.root.after(0, lambda: self.footer_text.config(text='Uploading to Cloudflare...'))
+        cfg = load_cfg()
+        ok = save_cfg(cfg) is not None
         self.root.after(0, lambda: (
             self.sync_status.config(text='Uploaded to Cloudflare ✓' if ok else 'Upload failed',
                                     fg=GREEN if ok else RED),
@@ -1063,15 +1090,57 @@ class AdminPanel:
         try:
             for i in self.users_tree.get_children(): self.users_tree.delete(i)
         except: return
-        try:
-            sync_download()
-        except: pass
         cfg = load_cfg()
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         blocked_ids = [b.get('lic_id', '') for b in blocklist if isinstance(b, dict)]
         blocked_hwids = [b.get('hwid', '') for b in blocklist if isinstance(b, dict)]
         users = {**cfg.get('users', {}), **cfg.get('admin', {})}
+        self._refresh_users_from_data(users, blocked_ids, blocked_hwids)
+        # Fetch D1 users in background, then update UI
+        threading.Thread(target=self._fetch_d1_users, args=(users, blocked_ids, blocked_hwids), daemon=True).start()
+
+    def _fetch_d1_users(self, users, blocked_ids, blocked_hwids):
+        try:
+            admin_token = 'admin_UrqbgE1A2zdWpIvoYBTVFieNL7O3P0Sy'
+            url = CLOUDFLARE_API_URL + '/admin/users?token=' + admin_token
+            req = urllib.request.Request(url, headers={'User-Agent': 'MDM-King'})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                d1_data = json.loads(resp.read().decode('utf-8'))
+            d1_users = {}
+            d1_emails = {}
+            d1_lics = _load_json(D1_LICENSES_PATH)
+            if not isinstance(d1_lics, dict): d1_lics = {}
+            for u in d1_data.get('users', []):
+                email = u.get('email') or u.get('username', '')
+                if not email: continue
+                user_info = {
+                    'activated': u.get('activated', False),
+                    'username': u.get('username', ''),
+                    'is_admin': u.get('is_admin', False),
+                    'd1': True,
+                    'created_at': u.get('created_at', ''),
+                }
+                # Merge local license info
+                if email in d1_lics:
+                    lic_data = d1_lics[email]
+                    user_info['license_key'] = lic_data.get('license_key', '')
+                    user_info['license_id'] = lic_data.get('license_id', '')
+                    user_info['license_type'] = lic_data.get('license_type', '')
+                    user_info['expiry'] = lic_data.get('expiry', '')
+                d1_users[email] = user_info
+                d1_emails[email] = u.get('username', '')
+            if d1_users:
+                users.update(d1_users)
+                self._d1_emails = d1_emails
+                self.root.after(0, lambda: self._refresh_users_from_data(users, blocked_ids, blocked_hwids))
+        except Exception:
+            pass
+
+    def _refresh_users_from_data(self, users, blocked_ids, blocked_hwids):
+        try:
+            for i in self.users_tree.get_children(): self.users_tree.delete(i)
+        except: return
         for email, data in sorted(users.items()):
             if not isinstance(data, dict): continue
             activated = data.get('activated', False)
@@ -1082,13 +1151,28 @@ class AdminPanel:
             if mid in blocked_hwids or lid in blocked_ids:
                 status = 'BLOCKED'
             elif activated:
-                status = 'ACTIVE'
+                exp_val = data.get('expiry', '')
+                if exp_val and exp_val != '—':
+                    try:
+                        exp_dt = datetime.datetime.fromisoformat(exp_val.replace('Z', '+00:00'))
+                        if exp_dt < datetime.datetime.now(datetime.timezone.utc):
+                            status = 'EXPIRED'
+                        else:
+                            status = 'ACTIVE'
+                    except Exception:
+                        status = 'ACTIVE'
+                else:
+                    status = 'ACTIVE'
             else:
                 status = 'PENDING'
             self.users_tree.insert('', tk.END, values=(email, status, mid, lic, exp, lid))
         self.user_status.config(text=f'{len(users)} users')
         # Update header stats
-        active = sum(1 for e, d in users.items() if isinstance(d, dict) and d.get('activated'))
+        active = sum(1 for e, d in users.items() if isinstance(d, dict) and d.get('activated') and (
+            not d.get('expiry') or (
+                datetime.datetime.fromisoformat(d['expiry'].replace('Z', '+00:00')) > datetime.datetime.now(datetime.timezone.utc)
+            ) if d.get('expiry') else True
+        ))
         blocked = sum(1 for e, d in users.items() if isinstance(d, dict) and (
             d.get('machine_id', '') in blocked_hwids or d.get('license_id', '') in blocked_ids))
         pending = len(users) - active - blocked
@@ -1100,9 +1184,6 @@ class AdminPanel:
         try:
             for i in self.lic_tree.get_children(): self.lic_tree.delete(i)
         except: return
-        try:
-            sync_download()
-        except: pass
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         blocked_ids = [b.get('lic_id', '') for b in blocklist if isinstance(b, dict)]
@@ -1119,9 +1200,6 @@ class AdminPanel:
         try:
             for i in self.bl_tree.get_children(): self.bl_tree.delete(i)
         except: return
-        try:
-            sync_download()
-        except: pass
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         for b in blocklist:

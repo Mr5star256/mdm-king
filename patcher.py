@@ -82,6 +82,8 @@ CHIPSET_PACKAGES = {
         'com.itel.security','com.itel.scorpio','com.itel.lock',
         'com.transsion.security','com.transsion.scorpio',
         'com.transsion.toolservice','com.sprd.omacp',
+        'com.transsion.safecenter','com.tecno.safecenter',
+        'com.infinix.safecenter','com.itel.safecenter',
     ],
     'mtk': [
         'com.transsion.security','com.transsion.scorpio','com.transsion.toolservice',
@@ -107,6 +109,8 @@ CHIPSET_PACKAGES = {
         'com.scorpio.privatecomp','com.scorpio.lockscreen',
         'com.cybercat.acbridge','com.cybercat.acbridgeoobe',
         'oobe',
+        'com.transsion.safecenter','com.tecno.safecenter',
+        'com.infinix.safecenter','com.itel.safecenter',
     ],
     'samsung': [
         'com.samsung.android.knox.policy','com.samsung.android.knox.core',
