@@ -1065,6 +1065,12 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
             # Patch this partition
             _part_name = os.path.splitext(os.path.basename(_part_path))[0]
             _part_out = final_out if (pi == len(_paths_to_patch) - 1 and len(_paths_to_patch) == 1) else _part_path + '.patched'
+            # Inject anti-relock prop overrides into build.prop/default.prop/system.prop/vendor.prop (prevents
+            # SPD/MTK re-lock after setup wizard — persist props are overridden by these at first boot)
+            try:
+                inject_relock_props(_part_path, os.path.getsize(_part_path), pats, reps, _log)
+            except Exception as _pie:
+                _log(f'[!] Relock injection skipped: {_pie}', 'w')
             _log('Applying patches...', 'h')
             _pc = _patch_one(_part_path, pats, reps, _all_zero_ranges, _hex_hit_ranges, _part_out)
             _total_patches += _pc
@@ -2425,7 +2431,9 @@ class MdmKingApp:
             return None
         self._adb_cache_done = True
         tools = self._tools_dir() or ''
-        for p in [os.path.join(tools, 'adb.exe'), r'C:\Program Files\platform-tools\adb.exe',
+        for p in [os.path.join(tools, 'adb.exe'),
+                  os.path.join(tools, 'platform-tools', 'adb.exe'),
+                  r'C:\Program Files\platform-tools\adb.exe',
                   os.path.expanduser(r'~\AppData\Local\Android\Sdk\platform-tools\adb.exe')]:
             if os.path.isfile(p):
                 try:
@@ -2444,6 +2452,10 @@ class MdmKingApp:
                     return path_adb
         except Exception: pass
         self._adb_path_cache = None
+        self.log('[!] ADB not found — bypass requires Android platform-tools', 'e')
+        self.log('    Download: https://dl.google.com/android/repository/platform-tools-latest-windows.zip', 'e')
+        self.log('    Extract it, then either add platform-tools to PATH or copy adb.exe +', 'e')
+        self.log('    AdbWinApi.dll + AdbWinUsbApi.dll into the tools\\ folder next to this .exe', 'e')
         return None
 
     def _wireless_pair(self):
@@ -3196,85 +3208,110 @@ class MdmKingApp:
         except (tk.TclError, AttributeError):
             pass
 
-    def _super_inject_props(self, path, file_size, pats, reps):
-        """Find build.prop / default.prop / system.prop and inject anti-relock overrides."""
-        _prop_overrides = [
-            b'persist.sys.mdm=0',
-            b'persist.sys.oobe.devicelock=0',
-            b'persist.sys.oobe=0',
-            b'ro.boot.mdm_state=disabled',
-            b'ro.boot.lock_state=unlocked',
-            b'persist.sys.phoenix=0',
-            b'ro.phoenix=0',
-            b'ro.transecurity=0',
-            b'persist.sys.trancritical=0',
-            b'ro.transsion.mdm=0',
-            b'persist.vendor.transsion.mdm=0',
-            b'ro.vendor.transsion.mdm=0',
-            b'ro.simlock.onekey=0',
-            b'ro.tne=0',
-            b'ro.cota=0',
-            b'persist.vendor.transecurity=0',
-            b'persist.sys.phoenix=0',
-        ]
-        _prop_files = [b'build.prop', b'default.prop', b'system.prop']
-        try:
-            _prop_ranges = []
-            with open(path, 'rb') as f:
-                off = 0
-                _chk = 4 * 1024 * 1024
-                while off < file_size:
-                    f.seek(off)
-                    data = f.read(_chk + max(len(p) for p in _prop_files))
-                    if not data: break
-                    for pf in _prop_files:
-                        idx = 0
-                        while True:
-                            pos = data.find(pf, idx)
-                            if pos < 0: break
-                            _start = data.rfind(b'\n', max(0, pos - 4096), pos)
-                            if _start < 0: _start = max(0, pos - 4096)
-                            _end = data.find(b'\x00', _start + 1)
-                            if _end < 0: _end = min(pos + 8192, len(data))
-                            _eoc = data.find(b'\n\n', pos, min(pos + 8192, len(data)))
-                            if _eoc > 0: _end = _eoc
-                            _abs_start = off + _start
-                            _abs_end = off + _end
-                            if _abs_end - _abs_start > 256:
-                                _prop_ranges.append((_abs_start, _abs_end))
-                            idx = pos + 1
-                    off += _chk
-            if not _prop_ranges: return
-            _prop_ranges.sort()
-            _merged = [_prop_ranges[0]]
-            for r in _prop_ranges[1:]:
-                if r[0] <= _merged[-1][1] + 4096:
-                    _merged[-1] = (_merged[-1][0], max(_merged[-1][1], r[1]))
-                else:
-                    _merged.append(r)
-            self.log(f'[*] Prop files: {len(_merged)} blocks found for relock injection', 'i')
-            _override_bytes = b'\n' + b'\n'.join(_prop_overrides) + b'\n'
-            with open(path, 'r+b') as f:
-                for ps, pe in _merged:
-                    f.seek(ps)
-                    _buf = f.read(min(pe - ps, 131072))
-                    _zero_run = _buf.find(b'\x00' * 512)
-                    if _zero_run >= 0:
-                        _inject_at = ps + _zero_run
-                        _inject_len = min(len(_override_bytes), 512)
-                        f.seek(_inject_at)
-                        f.write(_override_bytes[:_inject_len])
-                        self.log(f'  → Injected {_inject_len}B at offset 0x{_inject_at:x}', 'i')
-                    elif pe + len(_override_bytes) < file_size - 1024:
-                        f.seek(pe)
-                        f.write(_override_bytes)
-                        self.log(f'  → Appended {len(_override_bytes)}B at 0x{pe:x}', 'i')
-            for _ov in _prop_overrides:
-                if _ov not in pats:
-                    pats.append(_ov)
-                    reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
-        except Exception as _ei:
-            self.log(f'[!] Prop inject: {_ei}', 'o')
+def inject_relock_props(path, file_size, pats, reps, log_fn=None):
+    """Find build.prop / default.prop / system.prop inside an image and inject
+    anti-relock overrides. Also adds the overrides to pats/reps so any existing
+    '=1' variants get neutralised by first-byte-repeat during the scan.
+    Standalone (no self) so the subprocess worker can call it."""
+    _log = log_fn or (lambda m, l='i': None)
+    _prop_overrides = [
+        b'persist.sys.mdm=0',
+        b'persist.sys.oobe.devicelock=0',
+        b'persist.sys.oobe=0',
+        b'persist.sys.oobe_complete=0',
+        b'persist.sys.sim_locked=0',
+        b'persist.sys.recovery_mode=0',
+        b'persist.vendor.recovery.mode=0',
+        b'persist.sys.mdm=0',
+        b'persist.sys.phoenix=0',
+        b'ro.phoenix=0',
+        b'ro.transecurity=0',
+        b'persist.sys.trancritical=0',
+        b'ro.transsion.mdm=0',
+        b'persist.vendor.transsion.mdm=0',
+        b'ro.vendor.transsion.mdm=0',
+        b'persist.vendor.transecurity=0',
+        b'persist.sys.tne=0',
+        b'ro.tne=0',
+        b'ro.cota=0',
+        b'persist.sys.cota=0',
+        b'ro.simlock.onekey=0',
+        b'persist.vendor.mdm=0',
+        b'persist.vendor.sec=0',
+        b'persist.vendor.lock=0',
+        b'persist.vendor.sys.mdm=0',
+        b'persist.vendor.sys.security=0',
+        b'persist.security.knox=0',
+        b'persist.sys.securitycom=0',
+        b'persist.sys.knox=0',
+        b'persist.vendor.knox=0',
+        b'ro.spd.lock=0',
+        b'persist.sys.spd.lock=0',
+        b'ro.mdm.enabled=0',
+        b'ro.secfle.deviceowner=0',
+        b'ro.knox.enhanced=0',
+    ]
+    _prop_files = [b'build.prop', b'default.prop', b'system.prop', b'vendor.prop', b'product.prop']
+    try:
+        _prop_ranges = []
+        with open(path, 'rb') as f:
+            off = 0
+            _chk = 4 * 1024 * 1024
+            while off < file_size:
+                f.seek(off)
+                data = f.read(_chk + max(len(p) for p in _prop_files))
+                if not data: break
+                for pf in _prop_files:
+                    idx = 0
+                    while True:
+                        pos = data.find(pf, idx)
+                        if pos < 0: break
+                        _start = data.rfind(b'\n', max(0, pos - 4096), pos)
+                        if _start < 0: _start = max(0, pos - 4096)
+                        _end = data.find(b'\x00', _start + 1)
+                        if _end < 0: _end = min(pos + 8192, len(data))
+                        _eoc = data.find(b'\n\n', pos, min(pos + 8192, len(data)))
+                        if _eoc > 0: _end = _eoc
+                        _abs_start = off + _start
+                        _abs_end = off + _end
+                        if _abs_end - _abs_start > 256:
+                            _prop_ranges.append((_abs_start, _abs_end))
+                        idx = pos + 1
+                off += _chk
+        if not _prop_ranges:
+            _log('[*] No prop files found for relock injection', 'i')
+            return
+        _prop_ranges.sort()
+        _merged = [_prop_ranges[0]]
+        for r in _prop_ranges[1:]:
+            if r[0] <= _merged[-1][1] + 4096:
+                _merged[-1] = (_merged[-1][0], max(_merged[-1][1], r[1]))
+            else:
+                _merged.append(r)
+        _log(f'[*] Prop files: {len(_merged)} blocks found for relock injection', 'i')
+        _override_bytes = b'\n' + b'\n'.join(_prop_overrides) + b'\n'
+        with open(path, 'r+b') as f:
+            for ps, pe in _merged:
+                f.seek(ps)
+                _buf = f.read(min(pe - ps, 131072))
+                _zero_run = _buf.find(b'\x00' * 512)
+                if _zero_run >= 0:
+                    _inject_at = ps + _zero_run
+                    _inject_len = min(len(_override_bytes), 512)
+                    f.seek(_inject_at)
+                    f.write(_override_bytes[:_inject_len])
+                    _log(f'  -> Injected {_inject_len}B relock overrides at 0x{_inject_at:x}', 'i')
+                elif pe + len(_override_bytes) < file_size - 1024:
+                    f.seek(pe)
+                    f.write(_override_bytes)
+                    _log(f'  -> Appended {len(_override_bytes)}B relock overrides at 0x{pe:x}', 'i')
+        for _ov in _prop_overrides:
+            if _ov not in pats:
+                pats.append(_ov)
+                reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
+        _log(f'[+] Injected {len(_prop_overrides)} anti-relock prop overrides', 's')
+    except Exception as _ei:
+        _log(f'[!] Prop inject: {_ei}', 'o')
 
     def _do_auto_super_patch(self, path, ctx):
         """
@@ -3426,6 +3463,7 @@ class MdmKingApp:
             self.log(f'[+] Output: {os.path.basename(_final_out)}  {out_size//(1024*1024)} MB', 's')
             self.log('[!] WIPE /DATA via recovery before flash', 'e')
             self.log('[!] Scorpio updates in /data survive flash', 'e')
+            self.log('[!] During setup wizard: SKIP WiFi / NO SIM / NO network — MDM re-locks on server contact', 'e')
             self.log('[*] Flash order (BROM / Pandora / TSM):', 'h')
             self.log('[*]   1. Wipe data (recovery)', 'h')
             self.log('[*]   2. Flash super_KING.bin', 'h')
@@ -3615,8 +3653,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('MDM APP BYPASS'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
@@ -3751,7 +3791,7 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('NOKIA BYPASS'))
             self.root.after(50, lambda: self._update_progress(0, 5, 'Reading device info...', 'running'))
 
-            info = self._show_device_info_full(adb, s)
+            info = self._log_device_summary(adb, s)
             if not info: return
             self.root.after(50, lambda: self._update_progress(0, 5, 'Info OK', 'done'))
             self.log('BYPASSING', 'h')
@@ -4611,8 +4651,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('SPD BYPASS NEW METHOD'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
@@ -4660,8 +4702,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('MTK BYPASS NEW METHOD'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
@@ -4709,8 +4753,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('MTK BYPASS 2024'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
@@ -5746,6 +5792,26 @@ class MdmKingApp:
 
         return {'g': g, 'sh': sh, 'p': p, 's': s}
 
+    def _log_device_summary(self, adb, s, flags=0x08000000):
+        """Read + log the detected device identity BEFORE any bypass action starts.
+        Returns the info dict, or None if the device is not responding."""
+        info = self._show_device_info_full(adb, s, flags)
+        if not info:
+            return None
+        g = info['g']
+        model = g('ro.product.model')
+        brand = g('ro.product.brand')
+        android = g('ro.build.version.release')
+        serial = g('ro.serialno', 'sys.serialnumber')
+        self.log('━' * 40, 'h')
+        self.log('DEVICE DETECTED:', 's')
+        if model: self.log(f'  Model   : {model}', 'i')
+        if brand: self.log(f'  Brand   : {brand}', 'i')
+        if android: self.log(f'  Android : {android}', 'i')
+        if serial: self.log(f'  Serial  : {serial}', 'i')
+        self.log('━' * 40, 'h')
+        return info
+
     def _samsung_bypass_2023(self):
         self._block_close = True
         try:
@@ -5770,7 +5836,7 @@ class MdmKingApp:
             self._enqueue_ui(lambda: self.log_text.config(bg=self.c['log_bg'], fg=self.c['log_fg'],
                 insertbackground=self.c['log_fg'], font=('Consolas', 10)))
             self._enqueue_ui(lambda: self._update_progress(0, 3, '...', 'running'))
-            info = self._show_device_info_full(adb, s)
+            info = self._log_device_summary(adb, s)
             if not info: return
             self._enqueue_ui(lambda: self._update_progress(0, 3, '...', 'done'))
 
@@ -7251,8 +7317,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress('UNIVERSAL BYPASS OLD'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
@@ -7302,8 +7370,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self._show_progress(f'{brand} IT ADMIN'))
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'running'))
             self._show_flow_step('Checking server', 'ok')
-            info = self._show_device_info_full(adb, s)
+            self._show_flow_step('Device Info', 'running')
+            info = self._log_device_summary(adb, s)
             if not info: return
+            self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
             self.log('BYPASSING', 'h')
