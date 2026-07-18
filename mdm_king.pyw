@@ -610,11 +610,14 @@ MDM_REPLACEMENTS = []
 for p in MDM_PATTERNS:
     if p == b'frp_state=0':
         MDM_REPLACEMENTS.append(b'frp_state=1')
+    elif p == b'wifi_required=true':
+        MDM_REPLACEMENTS.append(b'wifi_required=0')
     else:
         _r = bytearray(p)
         if len(p) > 1:
-            # Preserve first byte (text files won't corrupt), zero rest
-            _r[1:] = b'\x00' * (len(p) - 1)
+            # Repeat first byte (valid string everywhere — no null-byte corruption in XML/DEX/.so)
+            _fb = _r[0:1]
+            _r[1:] = _fb * (len(p) - 1)
         MDM_REPLACEMENTS.append(bytes(_r))
 
 # ─── FastPatternFinder — Knox Wizard-style hex pattern engine v2 ───
@@ -898,6 +901,10 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
         _log(f'Page size: {_PAGE // (1024*1024)}MB | Scan chunk: {_SCAN_CHUNK // (1024*1024)}MB', 'i')
         _compiled_regex = re.compile(b'|'.join(re.escape(p) for p in pats))
         _pat_map = {}
+        _safe_pats = pats
+        _safe_regex = re.compile(b'|'.join(re.escape(p) for p in _safe_pats)) if _safe_pats else None
+        if _safe_pats:
+            _log(f'Full-page pattern scan: {len(_safe_pats)} patterns', 'i')
         for _p, _r in zip(pats, reps):
             _pat_map[_p] = _r
         # Safety: ensure all replacements are same-length as patterns (prevents offset corruption)
@@ -964,51 +971,34 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                     if _fully_zeroed:
                         fout_f.write(_ZERO_PAGE[:_end - _off] if _end - _off < len(_ZERO_PAGE) else b'\x00' * (_end - _off))
                         continue
-                    # Check if page overlaps any zero range
-                    _needs_read = False
-                    if _off < HEADER_SKIP or _end > _footer_start:
-                        _needs_read = True
-                    if not _needs_read and _all_zrs:
-                        _idx = _bisect.bisect_right(_z_starts, _off) - 1
-                        if _idx >= 0:
-                            _zs, _ze = _all_zrs[_idx]
-                            if _zs < _end and _ze > _off:
-                                _needs_read = True
-                        if not _needs_read:
-                            _next_idx = _bisect.bisect_left(_z_starts, _end)
-                            if _next_idx < len(_all_zrs) and _all_zrs[_next_idx][0] < _end:
-                                _needs_read = True
-                    if not _needs_read:
-                        fin.seek(_off)
-                        _raw = fin.read(_PAGE)
-                        if not _raw: break
-                        fout_f.write(_raw)
-                        continue
                     fin.seek(_off)
                     _raw = fin.read(_PAGE)
                     if not _raw: break
                     _data = bytearray(_raw)
-                    # Fast check: if page is fully inside a single zero range, skip APK scan (will be zeroed anyway)
-                    _fully_zeroed = False
+                    # Full-page pattern scan (ALL pages) — safe replacement (no null bytes)
+                    if _safe_regex:
+                        _data_bytes = bytes(_data)
+                        _slo = max(HEADER_SKIP - _off, 0) if _off < HEADER_SKIP else 0
+                        _shi = len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data)
+                        if _shi > _slo:
+                            for m in _safe_regex.finditer(_data_bytes, _slo, _shi):
+                                _matched = m.group()
+                                _rep = _pat_map.get(_matched)
+                                if _rep:
+                                    _data[m.start():m.end()] = _rep
+                                    _patch_count += 1
+                    # Pattern search inside zeroed ranges (BEFORE zeroing)
                     if _all_zrs:
-                        _idx = _bisect.bisect_right(_z_starts, _off) - 1
-                        if _idx >= 0:
-                            _zs, _ze = _all_zrs[_idx]
-                            if _zs <= _off and _ze >= _end:
-                                _fully_zeroed = True
-                    if not _fully_zeroed:
-                        # Pattern search on ORIGINAL data inside zeroed ranges (BEFORE zeroing)
                         _scan_zones = []
-                        if _all_zrs:
-                            for _zs, _ze in _all_zrs:
-                                if _ze <= _off: continue
-                                if _zs >= _end: break
-                                _zz = max(_zs, _off)
-                                _ze2 = min(_ze, _end)
-                                _sz_lo = max(_zz - _off, HEADER_SKIP - _off if _off < HEADER_SKIP else 0)
-                                _sz_hi = min(_ze2 - _off, len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data))
-                                if _sz_hi > _sz_lo:
-                                    _scan_zones.append((_sz_lo, _sz_hi))
+                        for _zs, _ze in _all_zrs:
+                            if _ze <= _off: continue
+                            if _zs >= _end: break
+                            _zz = max(_zs, _off)
+                            _ze2 = min(_ze, _end)
+                            _sz_lo = max(_zz - _off, HEADER_SKIP - _off if _off < HEADER_SKIP else 0)
+                            _sz_hi = min(_ze2 - _off, len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data))
+                            if _sz_hi > _sz_lo:
+                                _scan_zones.append((_sz_lo, _sz_hi))
                         if _scan_zones:
                             _data_bytes = bytes(_data)
                             for _sz_lo, _sz_hi in _scan_zones:
