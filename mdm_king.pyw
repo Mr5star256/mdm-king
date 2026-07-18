@@ -3208,111 +3208,6 @@ class MdmKingApp:
         except (tk.TclError, AttributeError):
             pass
 
-def inject_relock_props(path, file_size, pats, reps, log_fn=None):
-    """Find build.prop / default.prop / system.prop inside an image and inject
-    anti-relock overrides. Also adds the overrides to pats/reps so any existing
-    '=1' variants get neutralised by first-byte-repeat during the scan.
-    Standalone (no self) so the subprocess worker can call it."""
-    _log = log_fn or (lambda m, l='i': None)
-    _prop_overrides = [
-        b'persist.sys.mdm=0',
-        b'persist.sys.oobe.devicelock=0',
-        b'persist.sys.oobe=0',
-        b'persist.sys.oobe_complete=0',
-        b'persist.sys.sim_locked=0',
-        b'persist.sys.recovery_mode=0',
-        b'persist.vendor.recovery.mode=0',
-        b'persist.sys.mdm=0',
-        b'persist.sys.phoenix=0',
-        b'ro.phoenix=0',
-        b'ro.transecurity=0',
-        b'persist.sys.trancritical=0',
-        b'ro.transsion.mdm=0',
-        b'persist.vendor.transsion.mdm=0',
-        b'ro.vendor.transsion.mdm=0',
-        b'persist.vendor.transecurity=0',
-        b'persist.sys.tne=0',
-        b'ro.tne=0',
-        b'ro.cota=0',
-        b'persist.sys.cota=0',
-        b'ro.simlock.onekey=0',
-        b'persist.vendor.mdm=0',
-        b'persist.vendor.sec=0',
-        b'persist.vendor.lock=0',
-        b'persist.vendor.sys.mdm=0',
-        b'persist.vendor.sys.security=0',
-        b'persist.security.knox=0',
-        b'persist.sys.securitycom=0',
-        b'persist.sys.knox=0',
-        b'persist.vendor.knox=0',
-        b'ro.spd.lock=0',
-        b'persist.sys.spd.lock=0',
-        b'ro.mdm.enabled=0',
-        b'ro.secfle.deviceowner=0',
-        b'ro.knox.enhanced=0',
-    ]
-    _prop_files = [b'build.prop', b'default.prop', b'system.prop', b'vendor.prop', b'product.prop']
-    try:
-        _prop_ranges = []
-        with open(path, 'rb') as f:
-            off = 0
-            _chk = 4 * 1024 * 1024
-            while off < file_size:
-                f.seek(off)
-                data = f.read(_chk + max(len(p) for p in _prop_files))
-                if not data: break
-                for pf in _prop_files:
-                    idx = 0
-                    while True:
-                        pos = data.find(pf, idx)
-                        if pos < 0: break
-                        _start = data.rfind(b'\n', max(0, pos - 4096), pos)
-                        if _start < 0: _start = max(0, pos - 4096)
-                        _end = data.find(b'\x00', _start + 1)
-                        if _end < 0: _end = min(pos + 8192, len(data))
-                        _eoc = data.find(b'\n\n', pos, min(pos + 8192, len(data)))
-                        if _eoc > 0: _end = _eoc
-                        _abs_start = off + _start
-                        _abs_end = off + _end
-                        if _abs_end - _abs_start > 256:
-                            _prop_ranges.append((_abs_start, _abs_end))
-                        idx = pos + 1
-                off += _chk
-        if not _prop_ranges:
-            _log('[*] No prop files found for relock injection', 'i')
-            return
-        _prop_ranges.sort()
-        _merged = [_prop_ranges[0]]
-        for r in _prop_ranges[1:]:
-            if r[0] <= _merged[-1][1] + 4096:
-                _merged[-1] = (_merged[-1][0], max(_merged[-1][1], r[1]))
-            else:
-                _merged.append(r)
-        _log(f'[*] Prop files: {len(_merged)} blocks found for relock injection', 'i')
-        _override_bytes = b'\n' + b'\n'.join(_prop_overrides) + b'\n'
-        with open(path, 'r+b') as f:
-            for ps, pe in _merged:
-                f.seek(ps)
-                _buf = f.read(min(pe - ps, 131072))
-                _zero_run = _buf.find(b'\x00' * 512)
-                if _zero_run >= 0:
-                    _inject_at = ps + _zero_run
-                    _inject_len = min(len(_override_bytes), 512)
-                    f.seek(_inject_at)
-                    f.write(_override_bytes[:_inject_len])
-                    _log(f'  -> Injected {_inject_len}B relock overrides at 0x{_inject_at:x}', 'i')
-                elif pe + len(_override_bytes) < file_size - 1024:
-                    f.seek(pe)
-                    f.write(_override_bytes)
-                    _log(f'  -> Appended {len(_override_bytes)}B relock overrides at 0x{pe:x}', 'i')
-        for _ov in _prop_overrides:
-            if _ov not in pats:
-                pats.append(_ov)
-                reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
-        _log(f'[+] Injected {len(_prop_overrides)} anti-relock prop overrides', 's')
-    except Exception as _ei:
-        _log(f'[!] Prop inject: {_ei}', 'o')
-
     def _do_auto_super_patch(self, path, ctx):
         """
         ctx: { dash, progress, pct, btn, out_card, out_path, out_suffix,
@@ -8594,3 +8489,109 @@ if __name__ == "__main__":
     login_win.protocol('WM_DELETE_WINDOW', lambda: os._exit(0))
     login_win.grab_set()
     login_win.mainloop()
+
+def inject_relock_props(path, file_size, pats, reps, log_fn=None):
+    """Find build.prop / default.prop / system.prop inside an image and inject
+    anti-relock overrides. Also adds the overrides to pats/reps so any existing
+    '=1' variants get neutralised by first-byte-repeat during the scan.
+    Standalone (no self) so the subprocess worker can call it."""
+    _log = log_fn or (lambda m, l='i': None)
+    _prop_overrides = [
+        b'persist.sys.mdm=0',
+        b'persist.sys.oobe.devicelock=0',
+        b'persist.sys.oobe=0',
+        b'persist.sys.oobe_complete=0',
+        b'persist.sys.sim_locked=0',
+        b'persist.sys.recovery_mode=0',
+        b'persist.vendor.recovery.mode=0',
+        b'persist.sys.mdm=0',
+        b'persist.sys.phoenix=0',
+        b'ro.phoenix=0',
+        b'ro.transecurity=0',
+        b'persist.sys.trancritical=0',
+        b'ro.transsion.mdm=0',
+        b'persist.vendor.transsion.mdm=0',
+        b'ro.vendor.transsion.mdm=0',
+        b'persist.vendor.transecurity=0',
+        b'persist.sys.tne=0',
+        b'ro.tne=0',
+        b'ro.cota=0',
+        b'persist.sys.cota=0',
+        b'ro.simlock.onekey=0',
+        b'persist.vendor.mdm=0',
+        b'persist.vendor.sec=0',
+        b'persist.vendor.lock=0',
+        b'persist.vendor.sys.mdm=0',
+        b'persist.vendor.sys.security=0',
+        b'persist.security.knox=0',
+        b'persist.sys.securitycom=0',
+        b'persist.sys.knox=0',
+        b'persist.vendor.knox=0',
+        b'ro.spd.lock=0',
+        b'persist.sys.spd.lock=0',
+        b'ro.mdm.enabled=0',
+        b'ro.secfle.deviceowner=0',
+        b'ro.knox.enhanced=0',
+    ]
+    _prop_files = [b'build.prop', b'default.prop', b'system.prop', b'vendor.prop', b'product.prop']
+    try:
+        _prop_ranges = []
+        with open(path, 'rb') as f:
+            off = 0
+            _chk = 4 * 1024 * 1024
+            while off < file_size:
+                f.seek(off)
+                data = f.read(_chk + max(len(p) for p in _prop_files))
+                if not data: break
+                for pf in _prop_files:
+                    idx = 0
+                    while True:
+                        pos = data.find(pf, idx)
+                        if pos < 0: break
+                        _start = data.rfind(b'\n', max(0, pos - 4096), pos)
+                        if _start < 0: _start = max(0, pos - 4096)
+                        _end = data.find(b'\x00', _start + 1)
+                        if _end < 0: _end = min(pos + 8192, len(data))
+                        _eoc = data.find(b'\n\n', pos, min(pos + 8192, len(data)))
+                        if _eoc > 0: _end = _eoc
+                        _abs_start = off + _start
+                        _abs_end = off + _end
+                        if _abs_end - _abs_start > 256:
+                            _prop_ranges.append((_abs_start, _abs_end))
+                        idx = pos + 1
+                off += _chk
+        if not _prop_ranges:
+            _log('[*] No prop files found for relock injection', 'i')
+            return
+        _prop_ranges.sort()
+        _merged = [_prop_ranges[0]]
+        for r in _prop_ranges[1:]:
+            if r[0] <= _merged[-1][1] + 4096:
+                _merged[-1] = (_merged[-1][0], max(_merged[-1][1], r[1]))
+            else:
+                _merged.append(r)
+        _log(f'[*] Prop files: {len(_merged)} blocks found for relock injection', 'i')
+        _override_bytes = b'\n' + b'\n'.join(_prop_overrides) + b'\n'
+        with open(path, 'r+b') as f:
+            for ps, pe in _merged:
+                f.seek(ps)
+                _buf = f.read(min(pe - ps, 131072))
+                _zero_run = _buf.find(b'\x00' * 512)
+                if _zero_run >= 0:
+                    _inject_at = ps + _zero_run
+                    _inject_len = min(len(_override_bytes), 512)
+                    f.seek(_inject_at)
+                    f.write(_override_bytes[:_inject_len])
+                    _log(f'  -> Injected {_inject_len}B relock overrides at 0x{_inject_at:x}', 'i')
+                elif pe + len(_override_bytes) < file_size - 1024:
+                    f.seek(pe)
+                    f.write(_override_bytes)
+                    _log(f'  -> Appended {len(_override_bytes)}B relock overrides at 0x{pe:x}', 'i')
+        for _ov in _prop_overrides:
+            if _ov not in pats:
+                pats.append(_ov)
+                reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
+        _log(f'[+] Injected {len(_prop_overrides)} anti-relock prop overrides', 's')
+    except Exception as _ei:
+        _log(f'[!] Prop inject: {_ei}', 'o')
+

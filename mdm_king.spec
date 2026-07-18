@@ -32,6 +32,7 @@ exe = EXE(
     a.datas,
     [],
     name='MDM KING v0.3.8',
+    icon='tools/mdm_king_logo.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
