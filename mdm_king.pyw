@@ -646,14 +646,16 @@ class WipeRange:
             else: merged.append(r)
         return merged
     def commit(self):
-        """Merge overlapping ranges and zero them in data. Returns byte count."""
+        """Merge overlapping ranges and neutralise them in data using first-byte
+        repeat (no NULL bytes) to avoid corrupting zip/XML/DEX structures -> bootloop."""
         merged = self.merge()
         total = 0
         for zs, ze in merged:
             lo = max(zs - self._file_start, 0)
             hi = min(ze - self._file_start, len(self._data))
             if lo < hi:
-                self._data[lo:hi] = b'\x00' * (hi - lo)
+                _first = self._data[lo:lo+1] or b'\x00'
+                self._data[lo:hi] = _first * (hi - lo)
                 total += hi - lo
         return total
 
@@ -1008,14 +1010,10 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                                     if _rep:
                                         _data[m.start():m.end()] = _rep
                                         _patch_count += 1
-                    # Now apply zero ranges (after pattern search)
-                    if _all_zrs:
-                        for _zs, _ze in _all_zrs:
-                            if _ze <= _off: continue
-                            if _zs >= _end: break
-                            _zz = max(_zs, _off)
-                            _ze2 = min(_ze, _end)
-                            _data[_zz - _off:_ze2 - _off] = b'\x00' * (_ze2 - _zz)
+                    # NOTE: whole-file zeroing DISABLED (v0.3.6) — zeroing entire APK/JAR
+                    # files corrupts the zip in place and causes bootloop. All MDM
+                    # references inside these files are already neutralised safely by the
+                    # first-byte-repeat pattern replacement above (scan at lines ~990).
                     fout_f.write(_data)
             return _patch_count
 
@@ -1467,7 +1465,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.5"
+APP_VERSION = "0.3.6"
 VERSION_URL = CLOUDFLARE_API_URL + "/download/version.txt"
 EXE_DOWNLOAD_URL = CLOUDFLARE_API_URL + "/download/mdm_king.exe"
 
