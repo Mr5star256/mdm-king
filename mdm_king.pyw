@@ -1122,7 +1122,7 @@ _KWD_APK = [b'SecurityCom', b'securitycom', b'SecurityComPlugin', b'securitycomp
             b'com.scorpio.scorpio.securitycom',
             b'com.transsion.safecenter', b'com.tecno.safecenter', b'com.infinix.safecenter',
             b'com.itel.safecenter', b'SafeCenterService',
-            b'DevicePolicy', b'Container']
+            b'Container']
 _KWD_JAR = [b'systemupdate.jar', b'securitycompanion.jar', b'securityplugin.jar',
             b'SecurityPlugin.jar', b'securitycomplugin.jar', b'SecurityComPlugin.jar',
             b'scorpio-companion.jar', b'transsion-services.jar',
