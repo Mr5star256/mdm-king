@@ -8338,7 +8338,7 @@ if __name__ == "__main__":
         sw = login_win.winfo_screenwidth(); sh = login_win.winfo_screenheight()
         login_win.geometry(f'1200x650+{(sw-1200)//2}+{(sh-650)//2}')
         login_win.minsize(1100, 580)
-        login_win.title('MDM KING v0.3.5')
+        login_win.title('MDM KING v' + APP_VERSION)
         MdmKingApp(login_win); login_win.mainloop()
     
     # Bottom row: update check
