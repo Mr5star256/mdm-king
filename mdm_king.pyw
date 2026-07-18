@@ -171,10 +171,12 @@ MDM_PATTERNS = [
     b'com.scorpio.security', b'com.scorpio.securityplugin', b'com.scorpio.securitycomplugin',
     b'com.scorpio.securitywatchdog', b'com.scorpio.securityconfig', b'com.transsion.security', b'com.itel.security',
     b'com.tecno.security', b'com.infinix.security',
+    b'com.transsion.phone', b'com.itel.phone', b'com.infinix.phone', b'com.tecno.phone',
     b'scorpio_securitycom', b'scorpio_securitycompanion', b'scorpio_security', b'scorpio_secure', b'scp_security',
     b'ScorpioSecurityManager',
     b'enterpriseMDM', b'EnterpriseMdm', b'DeviceLockService',
     b'persist.security.', b'persist.mdm.', b'persist.sys.mdm',
+    b'ro.secfle.deviceowner', b'ro.mdm.enabled', b'ro.knox.enhanced', b'persist.sys.securitycom',
     b'persist.sys.knox', b'persist.vendor.knox', b'persist.security.knox',
     b'persist.vendor.sys.knox', b'persist.vendor.sys.security',
     b'sys.knox', b'sys.mdm', b'sys.security.knox',
@@ -1119,14 +1121,16 @@ _KWD_APK = [b'SecurityCom', b'securitycom', b'SecurityComPlugin', b'securitycomp
             b'com.infinix.securitycom', b'com.tecno.securitycom',
             b'com.scorpio.scorpio.securitycom',
             b'com.transsion.safecenter', b'com.tecno.safecenter', b'com.infinix.safecenter',
-            b'com.itel.safecenter', b'SafeCenterService']
+            b'com.itel.safecenter', b'SafeCenterService',
+            b'DevicePolicy', b'Container']
 _KWD_JAR = [b'systemupdate.jar', b'securitycompanion.jar', b'securityplugin.jar',
             b'SecurityPlugin.jar', b'securitycomplugin.jar', b'SecurityComPlugin.jar',
             b'scorpio-companion.jar', b'transsion-services.jar',
             b'tran-services.jar', b'itel-services.jar', b'sprd-services.jar',
             b'unisoc-services.jar', b'bg6m-services.jar',
             b'trancriticalparavfy-services.jar',
-            b'safecenter.jar', b'SafeCenter.jar']
+            b'safecenter.jar', b'SafeCenter.jar',
+            b'scorpio.jar', b'transsion.jar', b'itel.jar', b'infinix.jar', b'tecno.jar']
 _RE_APK = re.compile(b'|'.join(re.escape(k) for k in _KWD_APK))
 _RE_JAR = re.compile(b'|'.join(re.escape(k) for k in _KWD_JAR))
 
