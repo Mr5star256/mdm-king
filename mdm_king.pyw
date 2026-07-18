@@ -880,7 +880,7 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                     else:
                         _rep_arr = bytearray(_sp_bytes)
                         if len(_sp_bytes) > 1:
-                            _rep_arr[1:] = b'\x00' * (len(_sp_bytes) - 1)
+                            _rep_arr[1:] = _rep_arr[0:1] * (len(_sp_bytes) - 1)
                         _rep_bytes = bytes(_rep_arr)
                     pats.append(_sp_bytes)
                     reps.append(_rep_bytes)
@@ -911,7 +911,7 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
         for _p, _r in zip(pats, reps):
             if len(_r) != len(_p):
                 _r_fixed = bytearray(_p)
-                if len(_p) > 1: _r_fixed[1:] = b'\x00' * (len(_p) - 1)
+                if len(_p) > 1: _r_fixed[1:] = _r_fixed[0:1] * (len(_p) - 1)
                 _pat_map[_p] = bytes(_r_fixed)
         # Sparse → raw conversion (avoid lpunpack/lpmake which fails on MTK A15)
         _is_sparse = is_sparse
@@ -3272,7 +3272,7 @@ class MdmKingApp:
             for _ov in _prop_overrides:
                 if _ov not in pats:
                     pats.append(_ov)
-                    reps.append(_ov[0:1] + b'\x00' * (len(_ov) - 1))
+                    reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
         except Exception as _ei:
             self.log(f'[!] Prop inject: {_ei}', 'o')
 
