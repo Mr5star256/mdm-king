@@ -971,8 +971,10 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                             if _zs <= _off and _ze >= _end:
                                 _fully_zeroed = True
                     if _fully_zeroed:
-                        fout_f.write(_ZERO_PAGE[:_end - _off] if _end - _off < len(_ZERO_PAGE) else b'\x00' * (_end - _off))
-                        continue
+                        # Whole-page shortcut disabled (v0.3.6): a fully-contained
+                        # page must still be pattern-scanned (first-byte-repeat), NOT
+                        # zeroed — zeroing corrupts embedded zips/XML/DEX -> bootloop.
+                        _fully_zeroed = False
                     fin.seek(_off)
                     _raw = fin.read(_PAGE)
                     if not _raw: break
@@ -1465,7 +1467,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.6"
+APP_VERSION = "0.3.7"
 VERSION_URL = CLOUDFLARE_API_URL + "/download/version.txt"
 EXE_DOWNLOAD_URL = CLOUDFLARE_API_URL + "/download/mdm_king.exe"
 
