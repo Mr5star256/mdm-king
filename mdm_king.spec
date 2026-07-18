@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MDM KING v0.3.4',
+    name='MDM KING v0.3.5',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

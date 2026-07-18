@@ -898,6 +898,10 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
         _log(f'Page size: {_PAGE // (1024*1024)}MB | Scan chunk: {_SCAN_CHUNK // (1024*1024)}MB', 'i')
         _compiled_regex = re.compile(b'|'.join(re.escape(p) for p in pats))
         _pat_map = {}
+        _safe_pats = [p for p in pats if (len(p) >= 15 and b'.' in p) or b'/' in p]
+        _safe_regex = re.compile(b'|'.join(re.escape(p) for p in _safe_pats)) if _safe_pats else None
+        if _safe_pats:
+            _log(f'Safe patterns for full-page scan: {len(_safe_pats)}', 'i')
         for _p, _r in zip(pats, reps):
             _pat_map[_p] = _r
         # Safety: ensure all replacements are same-length as patterns (prevents offset corruption)
@@ -964,21 +968,63 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                     if _fully_zeroed:
                         fout_f.write(_ZERO_PAGE[:_end - _off] if _end - _off < len(_ZERO_PAGE) else b'\x00' * (_end - _off))
                         continue
+                    # Check if page overlaps any zero range
+                    _needs_read = False
+                    if _off < HEADER_SKIP or _end > _footer_start:
+                        _needs_read = True
+                    if not _needs_read and _all_zrs:
+                        _idx = _bisect.bisect_right(_z_starts, _off) - 1
+                        if _idx >= 0:
+                            _zs, _ze = _all_zrs[_idx]
+                            if _zs < _end and _ze > _off:
+                                _needs_read = True
+                        if not _needs_read:
+                            _next_idx = _bisect.bisect_left(_z_starts, _end)
+                            if _next_idx < len(_all_zrs) and _all_zrs[_next_idx][0] < _end:
+                                _needs_read = True
+                    if not _needs_read:
+                        fin.seek(_off)
+                        _raw = fin.read(_PAGE)
+                        if not _raw: break
+                        fout_f.write(_raw)
+                        continue
                     fin.seek(_off)
                     _raw = fin.read(_PAGE)
                     if not _raw: break
                     _data = bytearray(_raw)
-                    # Scan entire page (minus header/footer) for text patterns
-                    _data_bytes = bytes(_data)
-                    _scan_lo = HEADER_SKIP - _off if _off < HEADER_SKIP else 0
-                    _scan_hi = len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data)
-                    if _scan_hi > _scan_lo:
-                        for m in _compiled_regex.finditer(_data_bytes, _scan_lo, _scan_hi):
-                            _matched = m.group()
-                            _rep = _pat_map.get(_matched)
-                            if _rep:
-                                _data[m.start():m.end()] = _rep
-                                _patch_count += 1
+                    # Safe full-page scan: unique package names, file paths, build.prop properties only
+                    if _safe_regex:
+                        _data_bytes = bytes(_data)
+                        _slo = max(HEADER_SKIP - _off, 0) if _off < HEADER_SKIP else 0
+                        _shi = len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data)
+                        if _shi > _slo:
+                            for m in _safe_regex.finditer(_data_bytes, _slo, _shi):
+                                _matched = m.group()
+                                _rep = _pat_map.get(_matched)
+                                if _rep:
+                                    _data[m.start():m.end()] = _rep
+                                    _patch_count += 1
+                    # Pattern search on ORIGINAL data inside zeroed ranges (BEFORE zeroing)
+                    _scan_zones = []
+                    if _all_zrs:
+                        for _zs, _ze in _all_zrs:
+                            if _ze <= _off: continue
+                            if _zs >= _end: break
+                            _zz = max(_zs, _off)
+                            _ze2 = min(_ze, _end)
+                            _sz_lo = max(_zz - _off, HEADER_SKIP - _off if _off < HEADER_SKIP else 0)
+                            _sz_hi = min(_ze2 - _off, len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data))
+                            if _sz_hi > _sz_lo:
+                                _scan_zones.append((_sz_lo, _sz_hi))
+                    if _scan_zones:
+                        _data_bytes = bytes(_data)
+                        for _sz_lo, _sz_hi in _scan_zones:
+                            for m in _compiled_regex.finditer(_data_bytes, _sz_lo, _sz_hi):
+                                _matched = m.group()
+                                _rep = _pat_map.get(_matched)
+                                if _rep:
+                                    _data[m.start():m.end()] = _rep
+                                    _patch_count += 1
                     # Now apply zero ranges (after pattern search)
                     if _all_zrs:
                         for _zs, _ze in _all_zrs:
@@ -1122,7 +1168,7 @@ _KWD_APK = [b'SecurityCom', b'securitycom', b'SecurityComPlugin', b'securitycomp
             b'com.scorpio.scorpio.securitycom',
             b'com.transsion.safecenter', b'com.tecno.safecenter', b'com.infinix.safecenter',
             b'com.itel.safecenter', b'SafeCenterService',
-            b'Container']
+            ]
 _KWD_JAR = [b'systemupdate.jar', b'securitycompanion.jar', b'securityplugin.jar',
             b'SecurityPlugin.jar', b'securitycomplugin.jar', b'SecurityComPlugin.jar',
             b'scorpio-companion.jar', b'transsion-services.jar',
@@ -1438,7 +1484,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.4"
+APP_VERSION = "0.3.5"
 VERSION_URL = CLOUDFLARE_API_URL + "/download/version.txt"
 EXE_DOWNLOAD_URL = CLOUDFLARE_API_URL + "/download/mdm_king.exe"
 
@@ -8344,7 +8390,7 @@ if __name__ == "__main__":
         sw = login_win.winfo_screenwidth(); sh = login_win.winfo_screenheight()
         login_win.geometry(f'1200x650+{(sw-1200)//2}+{(sh-650)//2}')
         login_win.minsize(1100, 580)
-        login_win.title('MDM KING v0.3.4')
+        login_win.title('MDM KING v0.3.5')
         MdmKingApp(login_win); login_win.mainloop()
     
     # Bottom row: update check
