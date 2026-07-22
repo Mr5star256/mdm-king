@@ -72,9 +72,6 @@ CHIPSET_PACKAGES = {
         'com.transsion.plat.appupdate','com.transsion.systemupdate',
     ],
     'spd': [
-        'com.android.settings/.Settings\\$PrivateDnsModeSettingsActivity',
-        'com.android.settings/.Settings\\$PrivateDnsSettingsActivity',
-        'com.android.settings/.Settings\\$PrivacyDnsSettingsActivity',
         'com.scorpio.securitycompanion',
         'com.scorpio.securityservice','com.scorpio.securityupdate',
         'com.scorpio.securitymonitor','com.scorpio.secureconfig',

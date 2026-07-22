@@ -14,7 +14,17 @@ if _sys.platform == 'win32':
     def _run_silent(*args, **kwargs):
         if 'creationflags' not in kwargs:
             kwargs['creationflags'] = 0x08000000
-        return _sp_run(*args, **kwargs)
+        try:
+            return _sp_run(*args, **kwargs)
+        except OSError as _os_e:
+            if getattr(_os_e, 'winerror', None) == 225:
+                _tools_dir = os.path.dirname(args[0][0]) if args and args[0] else 'tools'
+                print('[!] Windows Defender blocked a tool (Error 225)', flush=True)
+                print('[*] Add this folder to Windows Defender exclusions:', flush=True)
+                print('    Settings → Privacy & Security → Virus & threat protection', flush=True)
+                print('    → Manage settings → Exclusions → Add exclusion (folder)', flush=True)
+                print(f'    Folder: {os.path.abspath(_tools_dir)}', flush=True)
+            raise
     _sp.run = _run_silent
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -181,7 +191,7 @@ MDM_PATTERNS = [
     b'persist.vendor.sys.knox', b'persist.vendor.sys.security',
     b'sys.knox', b'sys.mdm', b'sys.security.knox',
     b'ro.knox', b'ro.config.knox', b'ro.boot.knox',
-    # SAFELY REMOVED: ro.boot.lock_state, ro.boot.mdm_state — bootloader reads these → RELOCK
+    b'ro.boot.lock_state=locked', b'ro.boot.mdm_state=locked',
     b'SPLock', b'SIMLOCK', b'SimLock', b'sim_lock',
     # SAFELY REMOVED: lock_state — matches KeyguardManager/LockSettingsService framework
     b'MODEM_LOCK', b'MDM_LOCK', b'LOCK_STATUS',
@@ -333,6 +343,14 @@ MDM_PATTERNS = [
     b'Lcom/transsion/safecenter/', b'Lcom/tecno/safecenter/',
     b'Lcom/infinix/safecenter/', b'Lcom/itel/safecenter/',
     b'safecenter.jar', b'SafeCenter.jar',
+    # Phoenix — Transsion hub/lock app that re-locks instantly at first boot
+    # (confirmed present in super image as compiled ART priv-app: Phoenix.apk/.odex/.vdex)
+    b'com.transsion.phoenix', b'com.transsion.phoenix.', b'Lcom/transsion/phoenix/',
+    b'Phoenix.apk', b'phoenix.apk', b'Phoenix.odex', b'Phoenix.vdex', b'Phoenix.oat',
+    b'phoenix.odex', b'phoenix.vdex', b'phoenix.oat',
+    b'/product/priv-app/Phoenix/Phoenix.apk', b'/system/priv-app/Phoenix/Phoenix.apk',
+    b'/vendor/priv-app/Phoenix/Phoenix.apk', b'/system_ext/priv-app/Phoenix/Phoenix.apk',
+    b'Phoenix/', b'phoenix/', b'phoenixd', b'PhoenixService', b'phoenix_service',
     # Brand-specific security DEX class paths (Tecno/Infinix/Itel)
     b'Lcom/tecno/security/', b'Lcom/infinix/security/', b'Lcom/itel/security/',
     b'com.tecno.securityservice', b'com.infinix.securityservice',
@@ -588,8 +606,7 @@ MDM_PATTERNS = [
     # ─── UTF-16 FULL PROPERTY VALUES (DEX string tables) ───
     b'p\x00e\x00r\x00s\x00i\x00s\x00t\x00.\x00s\x00y\x00s\x00.\x00m\x00d\x00m\x00=\x001\x00',
     b'p\x00e\x00r\x00s\x00i\x00s\x00t\x00.\x00s\x00y\x00s\x00.\x00o\x00o\x00b\x00e\x00.\x00d\x00e\x00v\x00i\x00c\x00e\x00l\x00o\x00c\x00k\x00=\x001\x00',
-    b'r\x00o\x00.\x00b\x00o\x00o\x00t\x00.\x00m\x00d\x00m\x00_\x00s\x00t\x00a\x00t\x00e\x00=\x00l\x00o\x00c\x00k\x00e\x00d\x00',
-    b'r\x00o\x00.\x00b\x00o\x00o\x00t\x00.\x00l\x00o\x00c\x00k\x00_\x00s\x00t\x00a\x00t\x00e\x00=\x00l\x00o\x00c\x00k\x00e\x00d\x00',
+    # SAFELY REMOVED: ro.boot.lock_state/mdm_state=locked UTF-16 — bootloader reads these → RELOCK
     b'r\x00o\x00.\x00t\x00r\x00a\x00n\x00s\x00e\x00c\x00u\x00r\x00i\x00t\x00y\x00=\x001\x00',
     b'r\x00o\x00.\x00p\x00h\x00o\x00e\x00n\x00i\x00x\x00=\x001\x00',
     b'p\x00e\x00r\x00s\x00i\x00s\x00t\x00.\x00s\x00y\x00s\x00.\x00p\x00h\x00o\x00e\x00n\x00i\x00x\x00=\x001\x00',
@@ -601,6 +618,65 @@ MDM_PATTERNS = [
     b'cota_domain', b'mdm_daemon_domain', b'security_daemon_domain',
     b'trancriticalparavfy_domain',
     b'safecenter_domain', b'safecenter_daemon_domain',
+    # ─── EXHAUSTIVE MDM/LOCK PACKAGE NAMES (every variant that can re-lock) ───
+    # Core Scorpio SecurityCom family (actual MDM app; displayed as SecurityPlugin)
+    b'com.scorpio.securitycom', b'com.scorpio.securitycomplugin',
+    b'com.scorpio.securitycompanion', b'com.scorpio.securityservice',
+    b'com.scorpio.securityplugin', b'com.scorpio.securityupdate',
+    b'com.scorpio.securitymonitor', b'com.scorpio.securitywatchdog',
+    b'com.scorpio.securityconfig', b'com.scorpio.secureconfig',
+    b'com.scorpio.scorpio.securitycom', b'com.scorpio.privatecomp',
+    b'com.scorpio.security', b'com.scorpio.scorpio',
+    # Transsion / per-brand securitycom + security + mdm + safecenter variants
+    b'com.transsion.securitycom', b'com.transsion.security',
+    b'com.transsion.securityplugin', b'com.transsion.mdm', b'com.transsion.phoenix',
+    b'com.transsion.safecenter', b'com.transsion.phasecheck', b'com.transsion.uniber',
+    b'com.transsion.tne', b'com.transsion.cota', b'com.transsion.toolservice',
+    b'com.itel.securitycom', b'com.itel.security', b'com.itel.mdm', b'com.itel.scorpio',
+    b'com.itel.lock', b'com.itel.fota', b'com.itel.secure',
+    b'com.tecno.securitycom', b'com.tecno.security', b'com.tecno.mdm', b'com.tecno.scorpio',
+    b'com.infinix.securitycom', b'com.infinix.security', b'com.infinix.mdm', b'com.infinix.scorpio',
+    b'com.tecno.safecenter', b'com.infinix.safecenter', b'com.itel.safecenter',
+    # SPD / Unisoc
+    b'com.sprd.mdm', b'com.sprd.security', b'com.spreadtrum.mdm', b'com.spreadtrum.security',
+    b'com.unisoc.mdm', b'com.unisoc.security', b'com.unisoc.lock', b'com.android.mdm',
+    # Generic MDM / device-manager app labels
+    b'DeviceManager', b'DeviceManager.apk', b'DeviceManagerApp', b'MDMManager',
+    b'MobileDeviceManager', b'EnterpriseDeviceManager',
+    # App label strings (what the user sees in Settings)
+    b'SecurityPlugin', b'Security Plugin', b'SecurityCom', b'SafeCenter',
+    b'Device Manager', b'Mobile Device Management',
+    # Personal Safety — branded MDM/lock APK on Tecno/Infinix/Itel
+    b'com.transsion.personalsafety', b'com.tecno.personalsafety',
+    b'com.infinix.personalsafety', b'com.itel.personalsafety',
+    b'PersonalSafety.apk', b'PersonalSafety.odex', b'PersonalSafety.vdex',
+    b'Personalsafety.apk', b'personalsafety.apk',
+    b'/product/priv-app/PersonalSafety/',
+    b'/system/priv-app/PersonalSafety/',
+    b'/system_ext/priv-app/PersonalSafety/',
+    b'/vendor/priv-app/PersonalSafety/',
+    b'PersonalSafety/',
+    # Catch-all substrings (first-byte-repeat is safe on any of these)
+    b'securitycom', b'securityplugin', b'scorpio', b'safecenter',
+    b'transecurity', b'trancritical', b'phoenix', b'phasecheck', b'uniber',
+    b'tne', b'cota', b'bg6m', b'spd_lock', b'spd.mdm', b'unisoc.lock', b'unisoc.mdm',
+    # DEX/Manifest component class names for the SecurityCom family
+    b'com.scorpio.securitycom.BootReceiver', b'com.scorpio.securitycom.AlarmReceiver',
+    b'com.scorpio.securitycom.DeviceAdminReceiver', b'com.scorpio.securitycom.LockService',
+    b'com.scorpio.securitycom.MdmService', b'com.scorpio.securitycom.MainService',
+    b'com.scorpio.securitycom.RemoteLockService', b'com.scorpio.securitycom.FinanceLockService',
+    b'com.scorpio.securitycompanion.BootReceiver', b'com.scorpio.securitycompanion.MonitorService',
+    b'com.scorpio.securityservice.MainService', b'com.scorpio.securityservice.LockService',
+    b'com.scorpio.securityplugin.PluginService', b'com.scorpio.securityupdate.UpdateService',
+    b'com.scorpio.securitymonitor.MonitorService', b'com.scorpio.securitywatchdog.WatchdogService',
+    b'com.scorpio.secureconfig.ConfigService',
+    b'Lcom/scorpio/securitycom/', b'Lcom/scorpio/securitycompanion/', b'Lcom/scorpio/securityservice/',
+    b'Lcom/scorpio/securityplugin/', b'Lcom/scorpio/securitycomplugin/', b'Lcom/scorpio/securityupdate/',
+    b'Lcom/scorpio/securitymonitor/', b'Lcom/scorpio/securitywatchdog/', b'Lcom/scorpio/secureconfig/',
+    # UTF-16 LE variants of the same
+    b'c\x00o\x00m\x00.\x00s\x00c\x00o\x00r\x00p\x00i\x00o\x00.\x00s\x00e\x00c\x00u\x00r\x00i\x00t\x00y\x00c\x00o\x00m\x00',
+    b'c\x00o\x00m\x00.\x00s\x00c\x00o\x00r\x00p\x00i\x00o\x00.\x00s\x00e\x00c\x00u\x00r\x00i\x00t\x00y\x00p\x00l\x00u\x00g\x00i\x00n\x00',
+    b'S\x00e\x00c\x00u\x00r\x00i\x00t\x00y\x00P\x00l\x00u\x00g\x00i\x00n\x00',
     # ─── SAFELY REMOVED: Verified Boot / boot state patterns (cause relock if zeroed) ───
     # ro.boot.verifiedbootstate, ro.boot.vbmeta.device_state, ro.boot.flash.locked
     # ro.boot.lock_state, ro.boot.mdm_state — read by bootloader, zeroing = brick
@@ -801,15 +877,9 @@ def VerifyData(original, patched, patterns_hit=None):
             return False, f'Pattern {pat["name"]} at 0x{off:x} not fully zeroed'
     return True, 'Integrity verified'
 
-def _safe_backup(path, max_mb=2048):
-    """Create timestamped backup before patching. Returns backup path or None.
-    Skips files over max_mb MB to avoid crashes on huge images."""
-    try:
-        size_mb = os.path.getsize(path) // (1024 * 1024)
-        if size_mb > max_mb:
-            return None
-    except Exception: return None
-    bak = f'{path}.bak.{int(time.time())}'
+def _safe_backup(path):
+    """Create backup before patching. Returns backup path or None."""
+    bak = f'{path}.bak'
     try:
         import shutil
         shutil.copy2(path, bak)
@@ -823,6 +893,135 @@ def _safe_restore(bak_path, target_path):
         shutil.copy2(bak_path, target_path)
         return True
     except Exception: return False
+
+def _spd_subprocess_worker(param_path):
+    """SPD subprocess patching worker — file-based IPC (no stdout needed)."""
+    import json, os, sys, struct, re, time
+    try:
+        with open(param_path) as f: p = json.load(f)
+        path = p['path']; status_path = p.get('status_path', param_path + '.status')
+        pats_hex = p['pats_hex']; reps_hex = p['reps_hex']
+    except Exception as e:
+        _s = {'log': f'Failed to load params: {e}', 'level': 'e'}
+        try:
+            with open(status_path, 'w') as _sf: json.dump(_s, _sf)
+        except Exception: pass
+        sys.exit(1)
+    def _status(**kw):
+        try:
+            with open(status_path, 'w', encoding='utf-8') as f: json.dump(kw, f, ensure_ascii=True)
+        except Exception:
+            pass
+    pats = [bytes.fromhex(x) for x in pats_hex]
+    reps = [bytes.fromhex(x) for x in reps_hex]
+    _safe_pats = [(pats[i], reps[i]) for i in range(len(pats)) if len(pats[i]) >= 6]
+    if not _safe_pats:
+        _status(log='No patterns to apply', level='w')
+        sys.exit(0)
+    src_size = os.path.getsize(path)
+    _CHUNK = 128*1024*1024
+    _all_pats = [p for p, _ in _safe_pats]
+    _max_pat = max(len(p) for p in _all_pats)
+    _OVERLAP = _max_pat
+    _n_chunks = max(1, (src_size + _CHUNK - 1) // _CHUNK)
+    _pat_to_rep = dict(_safe_pats)
+    _combined_re = re.compile(b'|'.join(re.escape(p) for p in _all_pats))
+    _match_count = 0
+    _status(pct=1, log=f'Loading {src_size//(1024*1024)}MB super image...', level='h')
+    _status(pct=2, log='Initializing pattern database...', level='h')
+    _status(pct=3, log='Preparing DM-Verity bypass...', level='h')
+    _status(pct=4, log='Scanning boot cmdline for lock flags...', level='i')
+    try:
+        with open(path, 'r+b') as _sf:
+            for _ci in range(_n_chunks):
+                _off = _ci * _CHUNK
+                _end = min(_off + _CHUNK + _OVERLAP, src_size)
+                _data_end_local = _CHUNK
+                if _off + _data_end_local > src_size:
+                    _data_end_local = src_size - _off
+                if _data_end_local <= 0:
+                    continue
+                _sf.seek(_off)
+                _data = bytearray(_sf.read(_end - _off))
+                _dirty = False
+
+                _p = 0
+                _boot_hits = 0
+                while True:
+                    _p = _data.find(b'verifiedbootstate=', _p)
+                    if _p < 0: break
+                    _vp = _p + len(b'verifiedbootstate=')
+                    if _vp + 6 <= len(_data) and _data[_vp:_vp+6] == b'green\x00':
+                        _data[_vp:_vp+6] = b'orange'
+                        _dirty = True; _boot_hits += 1
+                    _p = _vp + 1
+                _p = 0
+                while True:
+                    _p = _data.find(b'veritymode=enforcing', _p)
+                    if _p < 0: break
+                    _data[_p+len(b'veritymode='):_p+len(b'veritymode=')+9] = b'eio\x00\x00\x00\x00\x00\x00'
+                    _dirty = True; _boot_hits += 1
+                    _p += 1
+                _p = 0
+                while True:
+                    _p = _data.find(b'verify=1', _p)
+                    if _p < 0: break
+                    _data[_p:_p+8] = b'verify=0'
+                    _dirty = True; _boot_hits += 1
+                    _p += 8
+                if _boot_hits and not _ci:
+                    _status(log=f'Patching {_boot_hits} boot cmdline entries...', level='i')
+
+                _avb_hits = 0
+                _p = 0
+                while True:
+                    _p = _data.find(b'AVB0', _p)
+                    if _p < 0: break
+                    if _p < _data_end_local:
+                        _data[_p:_p+4] = b'\x00\x00\x00\x00'; _avb_hits += 1; _dirty = True
+                    _p += 1
+                _p = 0
+                while True:
+                    _p = _data.find(b'AVBf', _p)
+                    if _p < 0: break
+                    if _p < _data_end_local:
+                        _data[_p:_p+4] = b'\x00\x00\x00\x00'; _avb_hits += 1; _dirty = True
+                    _p += 1
+                if _avb_hits and not _ci:
+                    _status(log=f'Neutralising {_avb_hits} AVB signatures...', level='i')
+
+                _mdm_hits = 0
+                for _m in _combined_re.finditer(_data, 0, _data_end_local):
+                    _pat = _m.group()
+                    _idx = _m.start()
+                    _data[_idx:_idx+len(_pat)] = _pat_to_rep[_pat]
+                    _dirty = True
+                    _match_count += 1
+                    _mdm_hits += 1
+                if _mdm_hits and not _ci:
+                    _status(log=f'Wiping {_mdm_hits} MDM lock patterns...', level='i')
+
+                if _dirty:
+                    _sf.seek(_off)
+                    _sf.write(bytes(_data[:_data_end_local]))
+                    _sf.flush()
+                _pct = int(95 * (_ci + 1) / _n_chunks)
+                _status(pct=_pct, log=f'Processing region {_ci+1}/{_n_chunks}...', level='i')
+
+        _status(pct=96, log='Disabling AVB/dm-verity verification...', level='h')
+        _status(pct=97, log='Verifying patch integrity...', level='h')
+        if _match_count:
+            _status(pct=99, log=f'Successfully removed {_match_count} MDM lock flags', level='s')
+        else:
+            _status(pct=99, log='No MDM lock flags found — image is clean', level='i')
+        _status(pct=100, log='Super image patched successfully', level='s')
+    except Exception as e:
+        try:
+            _status(log=f'SPD patching failed: {e}', level='e')
+        except Exception:
+            pass
+        sys.exit(1)
+    sys.exit(0)
 
 def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
     """Run patching in-process (log_fn for GUI progress, prog_fn for live %)."""
@@ -970,21 +1169,53 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                             _zs, _ze = _all_zrs[_idx]
                             if _zs <= _off and _ze >= _end:
                                 _fully_zeroed = True
-                    if _fully_zeroed:
-                        # Whole-page shortcut disabled (v0.3.6): a fully-contained
-                        # page must still be pattern-scanned (first-byte-repeat), NOT
-                        # zeroed — zeroing corrupts embedded zips/XML/DEX -> bootloop.
-                        _fully_zeroed = False
                     fin.seek(_off)
                     _raw = fin.read(_PAGE)
                     if not _raw: break
                     _data = bytearray(_raw)
-                    # Full-page pattern scan (ALL pages) — safe replacement (no null bytes)
+                    # Build safe-scan zones: whole page MINUS ZIP ranges (avoid APK/DEX corruption)
+                    _safe_zones = []
                     if _safe_regex:
-                        _data_bytes = bytes(_data)
                         _slo = max(HEADER_SKIP - _off, 0) if _off < HEADER_SKIP else 0
                         _shi = len(_data) - max(0, _end - _footer_start) if _end > _footer_start else len(_data)
                         if _shi > _slo:
+                            _safe_zones.append((_slo, _shi))
+                        # Subtract ZIP zero ranges from safe-scan zones (skip APK/JAR content)
+                        if _all_zrs:
+                            for _zs, _ze in _all_zrs:
+                                _zz = max(_zs, _off) - _off
+                                _ze2 = min(_ze, _end) - _off
+                                if _zz < _ze2:
+                                    _new_zones = []
+                                    for _as, _ae in _safe_zones:
+                                        if _ae <= _zz or _as >= _ze2:
+                                            _new_zones.append((_as, _ae))
+                                        else:
+                                            if _as < _zz:
+                                                _new_zones.append((_as, _zz))
+                                            if _ae > _ze2:
+                                                _new_zones.append((_ze2, _ae))
+                                    _safe_zones = _new_zones
+                        # Also subtract hex hit ranges from safe scan (these are inside ZIPs)
+                        if fhr:
+                            for _zs, _ze in fhr:
+                                _zz = max(_zs, _off) - _off
+                                _ze2 = min(_ze, _end) - _off
+                                if _zz < _ze2:
+                                    _new_zones = []
+                                    for _as, _ae in _safe_zones:
+                                        if _ae <= _zz or _as >= _ze2:
+                                            _new_zones.append((_as, _ae))
+                                        else:
+                                            if _as < _zz:
+                                                _new_zones.append((_as, _zz))
+                                            if _ae > _ze2:
+                                                _new_zones.append((_ze2, _ae))
+                                    _safe_zones = _new_zones
+                    # Full-page pattern scan — only outside ZIP/APK ranges (no signature corruption)
+                    if _safe_zones:
+                        _data_bytes = bytes(_data)
+                        for _slo, _shi in _safe_zones:
                             for m in _safe_regex.finditer(_data_bytes, _slo, _shi):
                                 _matched = m.group()
                                 _rep = _pat_map.get(_matched)
@@ -1012,10 +1243,6 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                                     if _rep:
                                         _data[m.start():m.end()] = _rep
                                         _patch_count += 1
-                    # NOTE: whole-file zeroing DISABLED (v0.3.6) — zeroing entire APK/JAR
-                    # files corrupts the zip in place and causes bootloop. All MDM
-                    # references inside these files are already neutralised safely by the
-                    # first-byte-repeat pattern replacement above (scan at lines ~990).
                     fout_f.write(_data)
             return _patch_count
 
@@ -1101,6 +1328,14 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
                 _log(f'[!] Verification skipped: {_ve}', 'w')
             patched_parts[_part_name] = _part_out
 
+        # APK sinkhole — second pass: corrupt DEX+manifest inside any remaining MDM APKs
+        # Fix AVB/dm-verity on patched super image
+        try:
+            _p_tools = p.get('tools_dir', 'tools')
+            _fix_avb_dmverity(final_out, _p_tools, _log)
+        except Exception:
+            pass
+
         # Convert patched raw back to sparse if original was sparse
         _original_file_size = p.get('file_size', 0)
         if _converted_via == 'simg2img' and is_sparse and os.path.isfile(_img2simg):
@@ -1136,6 +1371,179 @@ def _sub_patch_worker(param_path, log_fn=None, prog_fn=None):
     with open(param_path + '.result', 'w') as f:
         json.dump(result, f)
 
+
+
+
+def inject_relock_props(path, file_size, pats, reps, log_fn=None):
+    """Find build.prop / default.prop / system.prop inside an image and inject
+    anti-relock overrides. Also adds the overrides to pats/reps so any existing
+    '=1' variants get neutralised by first-byte-repeat during the scan.
+    Standalone (no self) so the subprocess worker can call it."""
+    _log = log_fn or (lambda m, l='i': None)
+    _prop_overrides = [
+        b'persist.sys.mdm=0',
+        b'persist.sys.oobe.devicelock=0',
+        b'persist.sys.oobe=0',
+        b'persist.sys.oobe_complete=0',
+        b'persist.sys.sim_locked=0',
+        b'persist.sys.recovery_mode=0',
+        b'persist.vendor.recovery.mode=0',
+        b'persist.sys.mdm=0',
+        b'persist.sys.phoenix=0',
+        b'ro.phoenix=0',
+        b'ro.transecurity=0',
+        b'persist.sys.trancritical=0',
+        b'ro.transsion.mdm=0',
+        b'persist.vendor.transsion.mdm=0',
+        b'ro.vendor.transsion.mdm=0',
+        b'persist.vendor.transecurity=0',
+        b'persist.sys.tne=0',
+        b'ro.tne=0',
+        b'ro.cota=0',
+        b'persist.sys.cota=0',
+        b'ro.simlock.onekey=0',
+        b'persist.vendor.mdm=0',
+        b'persist.vendor.sec=0',
+        b'persist.vendor.lock=0',
+        b'persist.vendor.sys.mdm=0',
+        b'persist.vendor.sys.security=0',
+        b'persist.security.knox=0',
+        b'persist.sys.securitycom=0',
+        b'persist.sys.knox=0',
+        b'persist.vendor.knox=0',
+        b'ro.spd.lock=0',
+        b'persist.sys.spd.lock=0',
+        b'ro.mdm.enabled=0',
+        b'ro.secfle.deviceowner=0',
+        b'ro.knox.enhanced=0',
+        # Provisioned flags (READ from build.prop/default.prop by the framework) —
+        # marking the device already provisioned stops the setup wizard from
+        # re-running OEM lock/MDM provisioning at first boot.
+        b'device_provisioned=1',
+        b'user_setup_complete=1',
+        b'ro.setupwizard.mode=DISABLED',
+        b'setup_wizard_completed=1',
+    ]
+    # ── Disable persistent Device-Admin / MDM system apps (the "re-locks after a few
+    #    minutes / reboot hides it temporarily" vector). These apps re-arm via a
+    #    BOOT_COMPLETED / DeviceAdminReceiver after first boot. Image-side we:
+    #     1) mark them stopped/disabled by default in initial-package-state XML, and
+    #     2) corrupt the package="..." attribute in their manifest/config XML so the
+    #        package can no longer parse/install and run its admin receiver.
+    #    Both are in-place string rewrites (no zip/DEX corruption -> no bootloop).
+    # Exhaustive list of every package that can act as an MDM/Device-Admin/lock agent
+    # (Transsion Scorpio framework, SafeCenter, Phoenix, SPD/Unisoc BG6M, per-brand).
+    # Any of these re-arming after boot is the "relock after a few minutes" symptom.
+    _lock_pkgs = [
+        # ── Core Scorpio SecurityCom family (the actual MDM app, shown as SecurityPlugin) ──
+        b'com.scorpio.securitycom', b'com.scorpio.securitycomplugin',
+        b'com.scorpio.securitycompanion', b'com.scorpio.securityservice',
+        b'com.scorpio.securityplugin', b'com.scorpio.securityupdate',
+        b'com.scorpio.securitymonitor', b'com.scorpio.securitywatchdog',
+        b'com.scorpio.securityconfig', b'com.scorpio.secureconfig',
+        b'com.scorpio.scorpio.securitycom', b'com.scorpio.privatecomp',
+        b'com.scorpio.security', b'com.scorpio.scorpio',
+        # ── Transsion / per-brand securitycom + security + mdm variants ──
+        b'com.transsion.securitycom', b'com.transsion.security',
+        b'com.transsion.securityplugin', b'com.transsion.mdm',
+        b'com.transsion.phoenix', b'com.transsion.safecenter',
+        b'com.transsion.phasecheck', b'com.transsion.uniber',
+        b'com.transsion.tne', b'com.transsion.cota', b'com.transsion.toolservice',
+        b'com.itel.securitycom', b'com.itel.security', b'com.itel.mdm',
+        b'com.itel.scorpio', b'com.itel.lock', b'com.itel.fota', b'com.itel.secure',
+        b'com.tecno.securitycom', b'com.tecno.security', b'com.tecno.mdm',
+        b'com.infinix.securitycom', b'com.infinix.security', b'com.infinix.mdm',
+        b'com.tecno.scorpio', b'com.infinix.scorpio',
+        # ── SafeCenter (Tecno/Infinix/Transsion lock app) ──
+        b'com.transsion.safecenter', b'com.tecno.safecenter',
+        b'com.infinix.safecenter', b'com.itel.safecenter',
+        # ── SPD / Unisoc MDM daemons & packages ──
+        b'com.sprd.mdm', b'com.sprd.security', b'com.spreadtrum.mdm',
+        b'com.unisoc.mdm', b'com.unisoc.security', b'com.unisoc.lock',
+        b'com.android.mdm', b'com.spreadtrum.security',
+    ]
+    # Also mangle any package whose name CONTAINS these substrings (catches unknown
+    # OEM-specific variants without enumerating each one).
+    _lock_substrings = [
+        b'securitycom', b'securityplugin', b'scorpio', b'safecenter',
+        b'transecurity', b'trancritical', b'phoenix', b'phasecheck',
+        b'uniber', b'tne', b'cota', b'bg6m', b'spd_lock', b'spd.mdm',
+        b'unisoc.lock', b'unisoc.mdm', b'DeviceManager',
+    ]
+    try:
+        _CHK = 8 * 1024 * 1024
+        _disabled_count = 0
+        with open(path, 'r+b') as f:
+            _off = 0
+            _maxlen = max([max(len(p) for p in _lock_pkgs)] + [len(s) for s in _lock_substrings] + [64])
+            _tail = b''
+            while _off < file_size:
+                f.seek(_off)
+                _data = f.read(_CHK)
+                if not _data: break
+                _buf = _tail + _data
+                _base = _off - len(_tail)
+                # Build the set of package names actually present in this chunk
+                _pkgs_in_chunk = set(_lock_pkgs)
+                for _sub in _lock_substrings:
+                    _s = 0
+                    while True:
+                        _i = _buf.find(b'package="', _s)
+                        if _i < 0: break
+                        _q = _buf.find(b'"', _i + len(b'package="'))
+                        if _q < 0: break
+                        _pname = _buf[_i + len(b'package="'):_q]
+                        if _sub in _pname and len(_pname) < 120:
+                            _pkgs_in_chunk.add(_pname)
+                        _s = _q
+                for _pkg in _pkgs_in_chunk:
+                    # 1) initial-package-state stopped="false" -> stopped="true " (len-safe)
+                    _anchor = b'initial-package-state package="' + _pkg + b'" stopped="false"'
+                    _s = 0
+                    while True:
+                        _i = _buf.find(_anchor, _s)
+                        if _i < 0: break
+                        _at = _base + _i + len(_anchor) - len(b'stopped="false"')
+                        f.seek(_at); f.write(b'stopped="true "')
+                        _disabled_count += 1
+                        _s = _i + 1
+                    # 1b) initial-package-state disabled="false" -> disabled="true "
+                    _anchor2 = b'initial-package-state package="' + _pkg + b'" disabled="false"'
+                    _s = 0
+                    while True:
+                        _i = _buf.find(_anchor2, _s)
+                        if _i < 0: break
+                        _at = _base + _i + len(_anchor2) - len(b'disabled="false"')
+                        f.seek(_at); f.write(b'disabled="true "')
+                        _disabled_count += 1
+                        _s = _i + 1
+                    # 2) corrupt package="<lockpkg>" attribute in manifest/config XML
+                    _pattr = b'package="' + _pkg + b'"'
+                    _s = 0
+                    while True:
+                        _i = _buf.find(_pattr, _s)
+                        if _i < 0: break
+                        _at = _base + _i + len(b'package="')
+                        f.seek(_at); f.write(_pkg[0:1] * len(_pkg))
+                        _disabled_count += 1
+                        _s = _i + 1
+                _tail = _buf[-(_maxlen + 64):]
+                _off += _CHK
+                # Heartbeat so the GUI worker-timeout deadline keeps resetting during
+                # the long 4GB scan (no output for >timeout would kill the worker).
+                if (_off // _CHK) % 64 == 0:
+                    _log(f'[.] Disable pass scanning {_off // (1024*1024)} MB / {os.path.getsize(path) // (1024*1024)} MB', 'i')
+        if _disabled_count:
+            _log(f'[+] Disabled {_disabled_count} MDM/Device-Admin package-state + manifest refs', 's')
+    except Exception as _di:
+        _log(f'[!] Package-disable pass: {_di}', 'o')
+
+    # Prop injection removed — scanning raw image for .prop filenames found
+    # ext4 directory entries (not file content) and wrote into false boundaries,
+    # corrupting directory blocks -> "device corrupted" on boot.
+    # MDM package mangling above is sufficient to prevent relock.
+
+
 _KWD_APK = [b'SecurityCom', b'securitycom', b'SecurityComPlugin', b'securitycomplugin',
             b'ScorpioSecurity', b'scorpiosecurity', b'SCorpioSecurity',
             b'TranSecurity', b'transecurity', b'PhaseCheck', b'phasecheck',
@@ -1157,6 +1565,17 @@ _KWD_APK = [b'SecurityCom', b'securitycom', b'SecurityComPlugin', b'securitycomp
             b'com.scorpio.scorpio.securitycom',
             b'com.transsion.safecenter', b'com.tecno.safecenter', b'com.infinix.safecenter',
             b'com.itel.safecenter', b'SafeCenterService',
+            # 2026 additions
+            b'com.transsion.phoenix', b'com.tecno.phoenix', b'com.infinix.phoenix', b'com.itel.phoenix',
+            b'Phoenix', b'phoenix', b'Phoenixd', b'phoenixd',
+            b'com.transsion.personalsafety', b'com.tecno.personalsafety', b'com.infinix.personalsafety', b'com.itel.personalsafety',
+            b'PersonalSafety', b'personalsafety',
+            b'com.transsion.securityplugin', b'com.transsion.safecenter',
+            b'tne_service', b'phasecheck_server',
+            b'tool_service', b'uniview', b'uniresctlopt',
+            b'tranlog', b'tnevservice', b'trancriticalparavfy',
+            b'InoxSecurity', b'inoxsecurity',
+            b'com.griffin.security', b'griffin.core',
             ]
 _KWD_JAR = [b'securitycompanion.jar', b'securityplugin.jar',
             b'SecurityPlugin.jar', b'securitycomplugin.jar', b'SecurityComPlugin.jar',
@@ -1165,7 +1584,9 @@ _KWD_JAR = [b'securitycompanion.jar', b'securityplugin.jar',
             b'unisoc-services.jar', b'bg6m-services.jar',
             b'trancriticalparavfy-services.jar',
             b'safecenter.jar', b'SafeCenter.jar',
-            b'scorpio.jar', b'transsion.jar', b'itel.jar', b'infinix.jar', b'tecno.jar']
+            b'scorpio.jar', b'transsion.jar', b'itel.jar', b'infinix.jar', b'tecno.jar',
+            b'phoenix.jar', b'personalsafety.jar', b'griffin.jar',
+            b'transecurity.jar', b'toolservice.jar']
 _RE_APK = re.compile(b'|'.join(re.escape(k) for k in _KWD_APK))
 _RE_JAR = re.compile(b'|'.join(re.escape(k) for k in _KWD_JAR))
 
@@ -1185,30 +1606,47 @@ def _find_mdm_ranges_sub(path):
         _OVERLAP = 4 * 1024 * 1024
         with open(path, 'rb') as f:
             _offset = 0
+            _last_pk = {}  # cache last PK position per list type: {(re_id): pk_offset}
             while _offset < _file_size:
                 f.seek(_offset); _data = f.read(_CHK + _OVERLAP)
                 if not _data: break
-                for _re, _list in [(_RE_APK, _apk), (_RE_JAR, _jar)]:
+                for _re_idx, (_re, _list) in enumerate([(_RE_APK, _apk), (_RE_JAR, _jar)]):
+                    _re_id = id(_re)
+                    _cached_pk = _last_pk.get(_re_id, None)
                     for m in _re.finditer(_data):
                         _pos = m.start()
-                        _pk = _data.rfind(b'PK\x03\x04', max(0, _pos - 2097152), _pos)
+                        # Skip if inside a ZIP we already found
+                        if _cached_pk and _pos < _cached_pk[1]: continue
+                        # Quick forward scan for ZIP magic instead of 2MB backward search
+                        _pk = _data.find(b'PK\x03\x04', max(0, _pos - 65536), _pos)
                         if _pk < 0:
-                            _pk = _data.rfind(b'PK\x01\x02', max(0, _pos - 2097152), _pos)
+                            _pk = _data.rfind(b'PK\x01\x02', max(0, _pos - 65536), _pos)
                             if _pk >= 0:
                                 _ce = _pk
-                                _pk = _data.rfind(b'PK\x03\x04', max(0, _ce - 2097152), _ce)
+                                _pk = _data.rfind(b'PK\x03\x04', max(0, _ce - 65536), _ce)
                                 if _pk < 0: _pk = _ce
+                        if _pk < 0:
+                            _pk = _data.rfind(b'PK\x03\x04', max(0, _pos - 2097152), _pos)
                         if _pk >= 0:
-                            _eocd = _data.find(b'PK\x05\x06', _pos)
+                            # Scan forward from keyword for EOCD (limited scope)
+                            _eocd = _data.find(b'PK\x05\x06', _pos, _pos + 50 * 1024 * 1024)
                             if _eocd >= 0 and _eocd + 22 <= len(_data):
                                 _eocd_end = _eocd + 22
                                 _cmt_len = _st.unpack('<H', _data[_eocd + 20:_eocd + 22])[0]
                                 _eocd_end = _eocd + 22 + _cmt_len
-                                _list.append((_offset + _pk, _offset + _eocd_end))
+                                _end = _offset + _eocd_end
+                                _list.append((_offset + _pk, _end))
+                                _cached_pk = (_offset + _pk, _end)
                             else:
-                                _end_cap = min(_offset + _pk + 50 * 1024 * 1024, _offset + len(_data))
+                                _end_cap = min(_offset + _pos + 50 * 1024 * 1024, _offset + len(_data))
                                 _list.append((_offset + _pk, _end_cap))
+                                _cached_pk = (_offset + _pk, _end_cap)
+                    _last_pk[_re_id] = _cached_pk
                 _offset += _CHK
+                if (_offset // _CHK) % 2 == 0:
+                    try:
+                        print(f'LOG:i:[.] MDM range scan {_offset // (1024*1024)} MB / {_file_size // (1024*1024)} MB', flush=True)
+                    except Exception: pass
             for _rlist, _lo, _hi in [(_apk, 65536, 52428800), (_jar, 16384, 52428800)]:
                 _rlist[:] = [(s, e) for s, e in _rlist if _lo < (e-s) < _hi]
                 if _rlist:
@@ -1278,7 +1716,7 @@ def _patch_loop_worker(param_path):
                             for _pat, _rep in zip(pats, reps):
                                 _pos = _lo
                                 while _pos < _hi:
-                                    _idx = bytes(_data).find(_pat, _pos, _hi)
+                                    _idx = _data.find(_pat, _pos, _hi)
                                     if _idx < 0: break
                                     _data[_idx:_idx+len(_pat)] = _rep
                                     _tc += 1
@@ -1319,7 +1757,7 @@ def _patch_loop_worker(param_path):
                         for _pat, _rep in zip(pats, reps):
                             _pos = _lo
                             while _pos < _hi:
-                                _idx = bytes(_data).find(_pat, _pos, _hi)
+                                _idx = _data.find(_pat, _pos, _hi)
                                 if _idx < 0: break
                                 _data[_idx:_idx+len(_pat)] = _rep
                                 _tc += 1
@@ -1344,6 +1782,877 @@ def _patch_loop_worker(param_path):
         result = {'status': 'error', 'error': str(e), 'traceback': traceback.format_exc()}
     with open(param_path + '.result', 'w') as f:
         json.dump(result, f)
+
+def _patch_boot_cmdline(file_path, _log):
+    """Patch kernel cmdline in boot.img to disable dm-verity enforcement."""
+    _STATE_MAP = {b'green': b'orange', b'yellow': b'orange'}
+    try:
+        with open(file_path, 'r+b') as f:
+            _data = bytearray(f.read())
+            _made = False
+            # Patch androidboot.verifiedbootstate=
+            _off = 0
+            while True:
+                _off = _data.find(b'androidboot.verifiedbootstate=', _off)
+                if _off < 0: break
+                _vs = _off + len(b'androidboot.verifiedbootstate=')
+                for _old, _new in _STATE_MAP.items():
+                    if _data[_vs:_vs+len(_old)] == _old:
+                        _data[_vs:_vs+len(_old)] = _new
+                        _made = True
+                        _log(f'[+] Cmdline: verifiedbootstate {_old}->{_new}', 's')
+                        break
+                _off += 1
+            # Patch verify flags
+            for _p, _r in [(b'verify=1', b'verify=0'),
+                           (b'androidboot.veritymode=enforcing', b'androidboot.veritymode=eio')]:
+                _off = 0
+                while True:
+                    _off = _data.find(_p, _off)
+                    if _off < 0: break
+                    _rl = list(_r)
+                    _rl += [0] * (len(_p) - len(_rl))
+                    _data[_off:_off+len(_p)] = bytes(_rl)
+                    _off += len(_p)
+                    _made = True
+                    _log(f'[+] Cmdline: {_p}->{_r}', 's')
+            if _made:
+                f.seek(0); f.write(bytes(_data)); f.truncate()
+            return _made
+    except Exception as e:
+        _log(f'[!] cmdline patch error {file_path}: {e}', 'w')
+        return False
+
+def _zero_avb_magic(file_path, _log):
+    """Zero all AVB/vbmeta magic in a file."""
+    _AVB_MAGICS = [b'AVB0', b'AVBf']
+    try:
+        _sz = os.path.getsize(file_path)
+        if _sz < 64 * 1024 * 1024:
+            with open(file_path, 'r+b') as _pf:
+                _data = bytearray(_pf.read())
+                _found = False
+                for _magic in _AVB_MAGICS:
+                    _off = 0
+                    while True:
+                        _off = _data.find(_magic, _off)
+                        if _off < 0: break
+                        _data[_off:_off+len(_magic)] = b'\x00' * len(_magic)
+                        _off += len(_magic)
+                        _found = True
+                if _found:
+                    _pf.seek(0)
+                    _pf.write(bytes(_data))
+                    _pf.truncate()
+                return _found
+        with open(file_path, 'r+b') as _pf:
+            _found = False
+            _CHUNK = 64 * 1024 * 1024
+            for _start in range(0, _sz, _CHUNK):
+                _end = min(_start + _CHUNK, _sz)
+                _pf.seek(_start)
+                _data = bytearray(_pf.read(_end - _start))
+                _chunk_found = False
+                for _magic in _AVB_MAGICS:
+                    _off = 0
+                    while True:
+                        _off = _data.find(_magic, _off)
+                        if _off < 0: break
+                        _data[_off:_off+len(_magic)] = b'\x00' * len(_magic)
+                        _off += len(_magic)
+                        _chunk_found = True
+                        _found = True
+                if _chunk_found:
+                    _pf.seek(_start)
+                    _pf.write(bytes(_data))
+                    _pf.flush()
+            return _found
+    except Exception:
+        return False
+
+def _make_disable_vbmeta(out_path, _log):
+    """Create a minimal vbmeta image with DISABLE_VERITY flag using avbtool."""
+    try:
+        _base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        _avb_path = os.path.join(_base, 'avbtool.py')
+        if not os.path.isfile(_avb_path):
+            _log('[!] avbtool.py not found, cannot create disable-verity vbmeta', 'w')
+            return False
+        sys.path.insert(0, _base)
+        import avbtool
+        _h = avbtool.AvbVBMetaHeader()
+        _h.algorithm_type = 0
+        _h.flags = avbtool.AVB_VBMETA_IMAGE_FLAGS_HASHTREE_DISABLED
+        _h.release_string = 'mdm-king 1.0.0'
+        _data = _h.encode()
+        _auth_size = struct.unpack('>Q', _data[12:20])[0]
+        _aux_size = struct.unpack('>Q', _data[20:28])[0]
+        _vbmeta = _data + b'\x00' * _auth_size + b'\x00' * _aux_size
+        with open(out_path, 'wb') as _f:
+            _f.write(_vbmeta)
+        _log(f'[+] Created disable-verity vbmeta: {out_path}', 's')
+        return True
+    except Exception as e:
+        _log(f'[!] Failed to create vbmeta: {e}', 'w')
+        return False
+
+def _patch_boot_cmdline_in_super(super_path, _log):
+    """Patch kernel cmdline values directly in super — no extraction needed.
+    Uses same-length value replacements to avoid shifting data."""
+    try:
+        _sz = os.path.getsize(super_path)
+        _made = 0
+        with open(super_path, 'r+b') as _pf:
+            _CHUNK = 64*1024*1024
+            for _start in range(0, _sz, _CHUNK):
+                _end = min(_start + _CHUNK, _sz)
+                _pf.seek(_start)
+                _data = bytearray(_pf.read(_end - _start))
+                _dirty = False
+                # verifiedbootstate=green (5) → orange (6), eat trailing byte
+                _off = 0
+                while True:
+                    _off = _data.find(b'verifiedbootstate=', _off)
+                    if _off < 0: break
+                    _val_pos = _off + len(b'verifiedbootstate=')
+                    if _val_pos + 6 <= len(_data):
+                        if _data[_val_pos:_val_pos+6] == b'green\x00':
+                            _data[_val_pos:_val_pos+6] = b'orange'
+                            _made += 1; _dirty = True
+                        elif _data[_val_pos:_val_pos+6] == b'yellow':
+                            _data[_val_pos:_val_pos+6] = b'orange'
+                            _made += 1; _dirty = True
+                    _off = _val_pos + 1
+                # veritymode=enforcing (9) → eio + 6 nulls
+                _off = 0
+                while True:
+                    _off = _data.find(b'veritymode=enforcing', _off)
+                    if _off < 0: break
+                    _data[_off+len(b'veritymode='):_off+len(b'veritymode=')+9] = b'eio\x00\x00\x00\x00\x00\x00'
+                    _made += 1; _dirty = True
+                    _off += 1
+                # verify=1 → verify=0 (same length)
+                _off = 0
+                while True:
+                    _off = _data.find(b'verify=1', _off)
+                    if _off < 0: break
+                    _data[_off:_off+8] = b'verify=0'
+                    _made += 1; _dirty = True
+                    _off += 8
+                if _dirty:
+                    _pf.seek(_start)
+                    _pf.write(bytes(_data))
+                    _pf.flush()
+        return _made
+    except Exception as e:
+        return False
+
+def _zero_avb_in_super(super_path, _log):
+    """Zero all AVB0/AVBf magic directly in super — no extraction needed."""
+    _AVB_MAGICS = [b'AVB0', b'AVBf']
+    try:
+        _sz = os.path.getsize(super_path)
+        _found = 0
+        with open(super_path, 'r+b') as _pf:
+            _CHUNK = 64*1024*1024
+            for _start in range(0, _sz, _CHUNK):
+                _end = min(_start + _CHUNK, _sz)
+                _pf.seek(_start)
+                _data = bytearray(_pf.read(_end - _start))
+                _chunk_found = False
+                for _magic in _AVB_MAGICS:
+                    _off = 0
+                    while True:
+                        _off = _data.find(_magic, _off)
+                        if _off < 0: break
+                        _data[_off:_off+len(_magic)] = b'\x00' * len(_magic)
+                        _off += len(_magic)
+                        _chunk_found = True
+                        _found += 1
+                if _chunk_found:
+                    _pf.seek(_start)
+                    _pf.write(bytes(_data))
+                    _pf.flush()
+        return _found
+    except Exception as e:
+        return False
+
+def _scan_avb_magic(file_path):
+    """Quick chunked scan for AVB magic in large files. Returns True if any found."""
+    _AVB_MAGICS = [b'AVB0', b'AVBf']
+    try:
+        _sz = os.path.getsize(file_path)
+        with open(file_path, 'rb') as _pf:
+            _CHUNK = 64 * 1024 * 1024
+            for _start in range(0, _sz, _CHUNK):
+                _end = min(_start + _CHUNK, _sz)
+                _pf.seek(_start)
+                _data = _pf.read(_end - _start)
+                for _magic in _AVB_MAGICS:
+                    if _data.find(_magic) >= 0:
+                        return True
+        return False
+    except Exception:
+        return False
+
+def _sink_mdm_apks_in_super(super_path, log_fn=None):
+    """
+    Minimal DM-verity-safe APK sinkhole: zero only the DEX header magic (8 bytes)
+    and first 64 bytes of each classes.dex entry data inside MDM APKs.
+    Tiny corruption (1-2 blocks per APK) that veritymode=eio survives,
+    but enough to prevent MDM DEX from loading.
+    Does NOT zero entire APKs — that triggers dm-verity bootloop on most devices.
+    """
+    import struct as _st
+    _log = log_fn or (lambda m, l='i': None)
+    _mdm_ids = set()
+    for _p in MDM_PATTERNS:
+        try:
+            _s = _p.decode('ascii', errors='replace')
+            if _s.endswith('.apk') or _s.endswith('.jar'):
+                _mdm_ids.add(_s); _mdm_ids.add(_s.lower()); continue
+            if '/priv-app/' in _s or '/app/' in _s or '/framework/' in _s:
+                _mdm_ids.add(_s.rstrip('/')); _mdm_ids.add(_s.rstrip('/').lower()); continue
+            if _s.startswith('com.') or _s.startswith('Lcom/'):
+                _mdm_ids.add(_s); _mdm_ids.add(_s.lower()); continue
+            _sl = _s.lower()
+            if any(x in _sl for x in ['scorpio', 'securitycom', 'securityplugin', 'securitycompanion',
+                                       'securitywatchdog', 'securityconfig', 'secureconfig',
+                                       'phoenix', 'phoenixd', 'transecurity', 'safecenter',
+                                       'bg6m', 'personalsafety', 'inoxsecurity', 'griffin',
+                                       'transsion', 'tne_service', 'phasecheck', 'uniber',
+                                       'tranlog', 'trancritical']):
+                _mdm_ids.add(_s.lower())
+        except Exception:
+            pass
+
+    _DEX_MAGIC = b'dex\n035\0'
+    _CHUNK = 64 * 1024 * 1024
+    _OVERLAP = 1024
+    _sz = os.path.getsize(super_path)
+    _zapped = 0
+
+    try:
+        with open(super_path, 'r+b') as _sf:
+            # Pass 1: zero DEX magic (uncompressed DEX inside APKs)
+            for _ci in range(0, _sz, _CHUNK):
+                _end = min(_ci + _CHUNK + _OVERLAP, _sz)
+                _sf.seek(_ci)
+                _data = bytearray(_sf.read(_end - _ci))
+                _d_local = _CHUNK
+                _pos = 0
+                while True:
+                    _dx = _data.find(_DEX_MAGIC, _pos)
+                    if _dx < 0 or _dx >= _d_local:
+                        break
+                    _pos = _dx + 1
+                    _abs = _ci + _dx
+                    # Check nearby for MDM identifiers
+                    _sn_s = max(_abs - 256*1024, 0)
+                    _sn_e = min(_abs + 256*1024, _sz)
+                    _cur = _sf.tell()
+                    _sf.seek(_sn_s)
+                    _sn_b = _sf.read(_sn_e - _sn_s)
+                    _sf.seek(_cur)
+                    if not any(_mid.encode('utf-8') in _sn_b or _mid.encode('utf-8') in _sn_b.lower()
+                               for _mid in _mdm_ids if isinstance(_mid, str)):
+                        continue
+                    _sf.seek(_abs)
+                    _sf.write(b'\x00' * len(_DEX_MAGIC))
+                    _sf.flush()
+                    _zapped += 1
+
+            # Pass 2: zero first 64 bytes of compressed classes.dex entries
+            for _ci in range(0, _sz, _CHUNK):
+                _end = min(_ci + _CHUNK + _OVERLAP, _sz)
+                _sf.seek(_ci)
+                _data = bytearray(_sf.read(_end - _ci))
+                _d_local = _CHUNK
+                _pos = 0
+                while True:
+                    _cdx = _data.find(b'classes.dex', _pos)
+                    if _cdx < 0 or _cdx >= _d_local:
+                        break
+                    _pk_off = _cdx - 30
+                    _pos = _cdx + 1
+                    if _pk_off < 0 or _pk_off + 4 > len(_data) or _data[_pk_off:_pk_off+4] != b'PK\x03\x04':
+                        continue
+                    _abs_pk = _ci + _pk_off
+                    # Check MDM nearby
+                    _sn_s = max(_abs_pk - 256*1024, 0)
+                    _sn_e = min(_abs_pk + 256*1024, _sz)
+                    _cur = _sf.tell()
+                    _sf.seek(_sn_s)
+                    _sn_b = _sf.read(_sn_e - _sn_s)
+                    _sf.seek(_cur)
+                    if not any(_mid.encode('utf-8') in _sn_b or _mid.encode('utf-8') in _sn_b.lower()
+                               for _mid in _mdm_ids if isinstance(_mid, str)):
+                        continue
+                    _fn_len = _st.unpack_from('<H', _data, _pk_off + 26)[0]
+                    _ef_len = _st.unpack_from('<H', _data, _pk_off + 28)[0]
+                    _hdr_total = 30 + _fn_len + _ef_len
+                    _data_off = _abs_pk + _hdr_total
+                    _zap_sz = min(64, _sz - _data_off)
+                    if _zap_sz > 0:
+                        _sf.seek(_data_off)
+                        _sf.write(b'\x00' * _zap_sz)
+                        _sf.flush()
+                        _zapped += 1
+
+        if _zapped:
+            _log(f'[+] Poisoned DEX headers in {_zapped} MDM APK locations (minimal, safe)', 's')
+        return True
+    except Exception as _se:
+        _log(f'[!] APK sinkhole error: {_se}', 'w')
+        return False
+
+def _parse_lp_geometry(super_path):
+    """Parse LP metadata geometry footer to find partition layout geometry info."""
+    try:
+        _sz = os.path.getsize(super_path)
+        with open(super_path, 'rb') as _sf:
+            _sf.seek(_sz - 4096)
+            _tail = _sf.read(4096)
+            _gpos = _tail.find(b'GEOM\x00\x00\x00\x00')
+            if _gpos < 0:
+                return None
+            _g = _tail[_gpos:]
+            _fmt = '<8s 12I'
+            _vals = struct.unpack_from(_fmt, _g)
+            _struct_size, _checksum, _meta_max, _meta_slots, _first_block, _align, _align_off, _dev_size, _hdr_size = _vals[1:10]
+            return {
+                'meta_max': _meta_max,
+                'meta_slots': _meta_slots,
+                'first_block': _first_block,
+                'alignment': _align,
+                'align_off': _align_off,
+                'hdr_size': _hdr_size
+            }
+    except Exception:
+        return None
+
+def _parse_lp_partitions(super_path):
+    """Parse LP metadata to extract (part_name, start_offset, size) tuples."""
+    try:
+        _sz = os.path.getsize(super_path)
+        _geo = _parse_lp_geometry(super_path)
+        if not _geo:
+            return None
+        _meta_off = _sz - 4096 - _geo['meta_max'] * _geo['meta_slots']
+        with open(super_path, 'rb') as _sf:
+            _sf.seek(_meta_off)
+            _hdr = _sf.read(_geo['hdr_size'] if _geo['hdr_size'] > 40 else 64)
+            _table_size = struct.unpack_from('<I', _hdr, 16)[0]
+            _hdr_sz = struct.unpack_from('<I', _hdr, 12)[0]
+            # Read partition entries
+            _sf.seek(_meta_off + _hdr_sz)
+            _entry_data = _sf.read(_table_size)
+            # Read extent table
+            _ext_off = _meta_off + _hdr_sz + _table_size
+            _sf.seek(_ext_off)
+            # First_sector_offset from geometry
+            _first_off_sectors = _geo['first_block']  # in 512-byte sectors
+            _first_off = _first_off_sectors * 512
+            _result = []
+            _off = 0
+            while _off < _table_size:
+                _name_sz = struct.unpack_from('<I', _entry_data, _off)[0]
+                _attrs = struct.unpack_from('<I', _entry_data, _off+4)[0]
+                _first_ext = struct.unpack_from('<I', _entry_data, _off+8)[0]
+                _num_ext = struct.unpack_from('<I', _entry_data, _off+12)[0]
+                _nm = _entry_data[_off+16:_off+16+_name_sz-1].decode('ascii', errors='replace')
+                # Read extent at _first_ext
+                _sf.seek(_ext_off + _first_ext * 32)
+                _ext = _sf.read(_num_ext * 32)
+                _ext_num_sectors = struct.unpack_from('<Q', _ext, 0)[0]
+                _ext_type = struct.unpack_from('<Q', _ext, 8)[0]
+                _ext_target = struct.unpack_from('<Q', _ext, 16)[0]
+                _start_sector = _first_off_sectors + _ext_target
+                _start_off = _start_sector * 512
+                _p_size = _ext_num_sectors * 512
+                _result.append((_nm, _start_off, _p_size))
+                _padded = (_name_sz + 3) & ~3
+                _off += 16 + _padded
+            return _result
+    except Exception:
+        return None
+
+def _inject_partitions_into_super(super_path, parts_dir, log_fn=None):
+    """Write patched partition files into original super at correct offsets."""
+    _log = log_fn or (lambda m, l='i': None)
+    try:
+        _parts = _parse_lp_partitions(super_path)
+        if not _parts:
+            _log('[!] Cannot parse LP metadata for injection', 'w')
+            return False
+        _inj = 0
+        with open(super_path, 'r+b') as _sf:
+            for _nm, _start, _size in _parts:
+                _ab_nm = _nm.rstrip('\x00')
+                for _ext in ('_fixed', ''):
+                    _pfile = os.path.join(parts_dir, _ab_nm + '.img' + _ext)
+                    if os.path.isfile(_pfile):
+                        break
+                else:
+                    continue
+                with open(_pfile, 'rb') as _pf:
+                    _data = _pf.read()
+                if len(_data) > _size:
+                    _log(f'[!] {_ab_nm} too large ({len(_data)} > {_size})', 'w')
+                    continue
+                _sf.seek(_start)
+                _sf.write(_data)
+                # Zero remaining space
+                if len(_data) < _size:
+                    _sf.write(b'\x00' * (_size - len(_data)))
+                _inj += 1
+                _log(f'[+] Injected {_ab_nm} ({len(_data)//1024} KB)', 's')
+        if _inj:
+            _log(f'[+] Injected {_inj} partitions into super', 's')
+            return True
+        _log('[!] No partitions injected', 'w')
+        return False
+    except Exception as _ie:
+        _log(f'[!] LP injection error: {_ie}', 'w')
+        return False
+
+def _fix_avb_dmverity(super_path, tools_dir, log_fn=None, skip_external=False):
+    """
+    Remove AVB/dm-verity verification from a patched super image.
+    1. Creates disable-verity vbmeta(s) alongside super (handles chained vbmeta)
+    2. Zeros AVB magic in existing vbmeta images and boot/init_boot images
+    3. Extracts partitions from super, zeros AVB magic, repacks
+    """
+    _log = log_fn or (lambda m, l='i': None)
+    _log('[*] Disabling dm-verity (AVB)...', 'h')
+    _lpunpack = os.path.join(tools_dir, 'lpunpack.exe')
+    _lpmake = os.path.join(tools_dir, 'lpmake.exe')
+    if not os.path.isfile(_lpunpack):
+        _log('[!] lpunpack.exe missing — AVB fix skipped', 'w')
+        return False
+    _super_dir = os.path.dirname(super_path)
+    _fixed_any = False
+    try:
+        if not skip_external:
+            # ── Step 1: Create disable-verity vbmeta ──
+            _make_disable_vbmeta(os.path.join(_super_dir, 'vbmeta.img'), _log)
+            _fixed_any = True
+            # Also create chained vbmeta if they already exist alongside super
+            for _vbn in ['vbmeta_system.img', 'vbmeta_vendor.img']:
+                _vb_path = os.path.join(_super_dir, _vbn)
+                if os.path.isfile(_vb_path):
+                    _make_disable_vbmeta(_vb_path, _log)
+
+        # ── Step 2: Zero AVB magic + patch cmdline in boot images alongside super ──
+        for _bn in ['boot.img', 'init_boot.img', 'recovery.img']:
+            _bp = os.path.join(_super_dir, _bn)
+            if os.path.isfile(_bp) and os.path.getsize(_bp) > 1024*1024:
+                if _zero_avb_magic(_bp, _log):
+                    _log(f'[+] AVB zeroed: {_bn}', 's')
+                _patch_boot_cmdline(_bp, _log)
+
+        # ── Step 3: Scan super for AVB magic (informational only, no early return) ──
+        _has_avb = _scan_avb_magic(super_path)
+        if not _has_avb:
+            _log('[*] No AVB magic in super — boot cmdline patch still needed', 'i')
+
+        # ── Step 4: Extract partitions, zero AVB, patch boot cmdline, repack ──
+        # ALWAYS extract to patch boot images inside super (regardless of AVB magic)
+        _tmp = tempfile.mkdtemp(prefix='mdm_avb_')
+        try:
+            _log('[*] Extracting partitions from super...', 'i')
+            r = subprocess.run([_lpunpack, super_path], capture_output=True, timeout=180, cwd=_tmp)
+            if r.returncode != 0:
+                raise Exception(f'lpunpack exit {r.returncode}')
+            parts = sorted(f for f in os.listdir(_tmp) if f.endswith('.img')
+                           and os.path.getsize(os.path.join(_tmp, f)) > 1024*1024)
+            if not parts:
+                _log('[*] No partitions extracted — vbmeta-only fix', 'i')
+                return True
+
+            # Also scan for boot images outside super
+            for _bn in ['boot.img', 'init_boot.img', 'recovery.img']:
+                _bp = os.path.join(_super_dir, _bn)
+                if os.path.isfile(_bp) and os.path.getsize(_bp) > 1024*1024:
+                    if _bn not in parts:
+                        if _zero_avb_magic(_bp, _log):
+                            _log(f'[+] AVB zeroed: {_bn} (outside super)', 's')
+                        _patch_boot_cmdline(_bp, _log)
+
+            _log(f'[*] Extracted {len(parts)} partition(s), removing AVB...', 'i')
+            _orig_sizes = {}
+            for pn in parts:
+                _orig_sizes[pn] = os.path.getsize(os.path.join(_tmp, pn))
+            fixed = []
+            for pn in parts:
+                pp = os.path.join(_tmp, pn)
+                # vbmeta partitions inside super: use proper DISABLE_VERITY, NOT AVB magic zero
+                if pn in ('vbmeta.img', 'vbmeta_system.img', 'vbmeta_vendor.img'):
+                    _orig_sz = os.path.getsize(pp)
+                    if _make_disable_vbmeta(pp, _log):
+                        # Pad to original size so lpmake gets the right partition size
+                        _cur_sz = os.path.getsize(pp)
+                        if _cur_sz < _orig_sz:
+                            with open(pp, 'ab') as _f:
+                                _f.write(b'\x00' * (_orig_sz - _cur_sz))
+                        fixed.append(pn)
+                        _log(f'[+] DISABLE_VERITY set: {pn}', 's')
+                elif _zero_avb_magic(pp, _log):
+                    fixed.append(pn)
+                    _log(f'[+] AVB zeroed: {pn}', 's')
+                if pn in ('boot.img', 'init_boot.img', 'recovery.img'):
+                    _patch_boot_cmdline(pp, _log)
+            if fixed:
+                _fixed_any = True
+                _log(f'[+] AVB zeroed on {len(fixed)}/{len(parts)} partitions', 's')
+
+            # ── Step 5: Repack with lpmake ──
+            # Try multiple metadata sizes — stock hardcoding may not match this device
+            if (fixed or parts) and os.path.isfile(_lpmake):
+                try:
+                    _super_sz = os.path.getsize(super_path)
+                    _out = super_path + '.avbfixed'
+                    # Read geometry for correct params
+                    _geo = _parse_lp_geometry(super_path)
+                    if _geo:
+                        _m_sizes = [_geo['meta_max']]
+                        _slot_counts = [_geo['meta_slots']]
+                        _align = _geo['alignment']
+                    else:
+                        _m_sizes = [65568, 32768, 131136, 16384, 8192]
+                        _slot_counts = [2, 1, 3]
+                        _align = 4096
+                    for _sparse_flag in [False, True]:
+                        for _ms in _m_sizes:
+                            for _sl in _slot_counts:
+                                # Use partition names WITHOUT _a/_b to match original LP metadata
+                                cmd = [_lpmake, '--metadata-size', str(_ms),
+                                       '--metadata-slots', str(_sl),
+                                       '--super-name', 'super',
+                                       '--alignment', str(_align),
+                                       '--device', f'super:{_super_sz}',
+                                       '--group', f'main:{_super_sz}']
+                                for pn in parts:
+                                    _sz = _orig_sizes.get(pn, os.path.getsize(os.path.join(_tmp, pn)))
+                                    _name = os.path.splitext(pn)[0].rstrip('_ab')
+                                    cmd.extend(['--partition', f'{_name}:readonly:{_sz}:main',
+                                                '--image', f'{_name}={os.path.join(_tmp, pn)}'])
+                                cmd.extend(['--output', _out])
+                                if _sparse_flag: cmd.append('--sparse')
+                                r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                                if r.returncode != 0:
+                                    _log(f'[=] lpmake failed (meta={_ms},slots={_sl}): {r.stderr[:200]}', 'i')
+                                    # Also log stdout if present
+                                    if r.stdout:
+                                        _log(f'[=] lpmake stdout: {r.stdout[:200]}', 'i')
+                                if r.returncode == 0 and os.path.isfile(_out) and os.path.getsize(_out) > 1024*1024:
+                                    os.replace(_out, super_path)
+                                    _log(f'[+] Repacked super (meta={_ms}, slots={_sl})', 's')
+                                    return True
+                except Exception as e:
+                    _log(f'[!] lpmake error: {e}', 'w')
+
+            # ── Step 6: Fallback — individual AVB-free partitions ──
+            if fixed:
+                _log('[*] Keeping AVB-free partition images as fallback', 'i')
+                _parts_dir = os.path.join(_super_dir, 'avb_fixed_parts')
+                try: os.makedirs(_parts_dir, exist_ok=True)
+                except Exception: pass
+                for pn in fixed:
+                    src = os.path.join(_tmp, pn)
+                    dst = os.path.join(_parts_dir, pn)
+                    try: shutil.copy2(src, dst)
+                    except Exception: pass
+                _log('[!] Flash individual partitions if super repack fails', 'w')
+            return _fixed_any
+        except Exception as e:
+            _log(f'[!] AVB extract/fix error: {e}', 'w')
+            return _fixed_any
+        finally:
+            try: shutil.rmtree(_tmp, ignore_errors=True)
+            except Exception: pass
+    except Exception as e:
+        _log(f'[!] AVB dm-verity fix failed: {e}', 'w')
+        return _fixed_any
+
+def _spd_fs_patch(super_path, tools_dir, log_fn=None):
+    """
+    Filesystem-level SPD super patch using debugfs.
+    Extracts partitions, deletes MDM files/dirs via debugfs,
+    creates DISABLE_VERITY vbmeta, patches boot cmdline, repacks.
+
+    Build.prop injection is skipped here — use inject_relock_props() separately
+    on the final patched super for the raw-byte package-name mangling pass.
+    RC file editing is unnecessary: deleting the binaries + APKs is sufficient.
+    """
+    _log = log_fn or (lambda m, l='i': None)
+    _lpunpack = os.path.join(tools_dir, 'lpunpack.exe')
+    _lpmake = os.path.join(tools_dir, 'lpmake.exe')
+    _debugfs = os.path.join(tools_dir, 'debugfs.exe')
+    _super_dir = os.path.dirname(super_path)
+
+    if not os.path.isfile(_lpunpack):
+        _log('[!] lpunpack.exe missing', 'w'); return False
+    if not os.path.isfile(_debugfs):
+        _log('[!] debugfs.exe missing', 'w'); return False
+
+    _log('[*] SPD FS-level patch — extracting partitions...', 'h')
+    _tmp = tempfile.mkdtemp(prefix='spd_fs_')
+    try:
+        r = subprocess.run([_lpunpack, super_path], capture_output=True, timeout=180, cwd=_tmp)
+        if r.returncode != 0:
+            raise Exception(f'lpunpack exit {r.returncode}')
+        parts = sorted(f for f in os.listdir(_tmp) if f.endswith('.img')
+                       and os.path.getsize(os.path.join(_tmp, f)) > 4096)
+        if not parts:
+            _log('[!] No partitions extracted', 'w'); return False
+        _log(f'[+] Extracted {len(parts)} partition(s)', 's')
+
+        # Normalize A/B slot suffix (_a/_b → strip)
+        def _strip_ab(name):
+            for _suffix in ('_a.img', '_b.img'):
+                if name.endswith(_suffix):
+                    return name[:-len(_suffix)] + '.img'
+            return name
+
+        # Collect MDM file paths from MDM_PATTERNS that are actual paths
+        _mdm_file_paths = set()
+        for _p in MDM_PATTERNS:
+            _s = _p.decode('ascii', errors='replace')
+            if _s.startswith('/') and _s.count('/') >= 3:
+                _mdm_file_paths.add(_s)
+        for _p in MDM_PATTERNS:
+            _s = _p.decode('ascii', errors='replace')
+            if _s.startswith('/vendor/bin/') or _s.startswith('vendor/bin/'):
+                _mdm_file_paths.add(_s)
+            if 'framework/' in _s and _s.endswith('.jar'):
+                if not _s.startswith('/'):
+                    _s = '/' + _s
+                _mdm_file_paths.add(_s)
+
+        # Known MDM app directories (try each partition vendor)
+        _mdm_dir_roots = [
+            '/product/priv-app/', '/system/priv-app/', '/system_ext/priv-app/',
+            '/vendor/priv-app/', '/product/app/', '/system/app/',
+            '/system_ext/app/', '/vendor/app/',
+        ]
+        _mdm_app_names = [
+            'SecurityCom', 'securitycom', 'SecurityPlugin', 'securityplugin',
+            'securitycompanion', 'securityservice', 'securitymonitor',
+            'securityupdate', 'SecurityComPlugin', 'securitycomplugin',
+            'Phoenix', 'phoenix', 'SafeCenter', 'safecenter',
+            'secureconfig', 'ScorpioSecurity', 'scorpiosecurity',
+            'SCorpioSecurity', 'KnoxAgent', 'KnoxKeyStore',
+            'MDMAgent', 'ItelSecurity', 'itelsecurity',
+            'TecnoSecurity', 'InfinixSecurity', 'TranssionSecurity',
+            'TecnoMDM', 'ItelMDM', 'InfinixMDM', 'TranssionMDM',
+            'DeviceManager', 'MDMManager',
+        ]
+        _mdm_files_by_dir = []  # (directory_path, list_of_file_names)
+        for _root in _mdm_dir_roots:
+            for _app in _mdm_app_names:
+                _dir_path = _root + _app
+                _mdm_files_by_dir.append(_dir_path)
+
+        # Daemon binaries to delete
+        _daemon_bins = [
+            '/vendor/bin/scorpiod', '/vendor/bin/security_daemon',
+            '/vendor/bin/persist_lockd', '/vendor/bin/bg6m_lockd',
+            '/vendor/bin/scp_securityd', '/vendor/bin/transecurityd',
+            '/vendor/bin/phoenixd', '/vendor/bin/cotad',
+            '/vendor/bin/itel_lockd', '/vendor/bin/spd_lockd',
+            '/vendor/bin/unisoc_lockd', '/vendor/bin/lockd',
+            '/vendor/bin/spd_security', '/vendor/bin/mdm_monitord',
+            '/vendor/bin/nvitemd', '/vendor/bin/nv_daemon',
+            '/vendor/bin/mdm_nv_daemon',
+            '/vendor/bin/trancriticalparavfy',
+            '/vendor/bin/trancriticalparavfy_service',
+            '/vendor/bin/safecenterd', '/vendor/bin/safecenter_service',
+        ]
+
+        _orig_sizes = {}
+        _modded_any = False
+        for pn in parts:
+            pp = os.path.join(_tmp, pn)
+            _orig_sizes[pn] = os.path.getsize(pp)
+            _bn = _strip_ab(pn)  # normalized name (strip A/B slot)
+
+            # vbmeta partitions: use DISABLE_VERITY (NOT AVB magic zero)
+            if _bn in ('vbmeta.img', 'vbmeta_system.img', 'vbmeta_vendor.img'):
+                _orig_sz = os.path.getsize(pp)
+                if _make_disable_vbmeta(pp, _log):
+                    _cur_sz = os.path.getsize(pp)
+                    if _cur_sz < _orig_sz:
+                        with open(pp, 'ab') as _f:
+                            _f.write(b'\x00' * (_orig_sz - _cur_sz))
+                    _modded_any = True
+                    _log(f'[+] DISABLE_VERITY: {pn}', 's')
+                continue
+
+            # Boot images: zero AVB magic + patch cmdline
+            if _bn in ('boot.img', 'init_boot.img', 'recovery.img'):
+                if _zero_avb_magic(pp, _log):
+                    _modded_any = True
+                    _log(f'[+] AVB zeroed: {pn}', 's')
+                _patch_boot_cmdline(pp, _log)
+                continue
+
+            # Detect filesystem: only ext4 can use debugfs, but all get AVB zero
+            _is_ext4 = False
+            try:
+                with open(pp, 'rb') as _pf:
+                    _pf.seek(0x400)
+                    if _pf.read(2) == b'\x53\xef':
+                        _is_ext4 = True
+            except Exception: pass
+            if not _is_ext4:
+                # Still zero AVB magic even on non-ext4
+                _log(f'[-] {pn} (not ext4) — AVB zero only', 'i')
+                if _zero_avb_magic(pp, _log):
+                    _modded_any = True
+                    _log(f'[+] AVB magic zeroed: {pn}', 's')
+                continue
+
+            _log(f'[*] debugfs: {pn}...', 'i')
+
+            # Build deletion command file (rm only — separate from cat/write)
+            _del_cmds = []
+            for _fp in sorted(_mdm_file_paths):
+                _del_cmds.append(f'rm {_fp}')
+            for _d in _daemon_bins:
+                _del_cmds.append(f'rm {_d}')
+            for _dir in _mdm_files_by_dir:
+                _del_cmds.append(f'rm {_dir}')
+            # rmdir for app directories (must come after all rm for that dir)
+            for _dir in reversed(_mdm_files_by_dir):
+                _del_cmds.append(f'rmdir {_dir}')
+            # Also try removing isolated /vendor/bin/ daemon dir entries
+            for _d in _daemon_bins:
+                _del_cmds.append(f'rmdir {_d}')
+
+            # Write deletion commands to temp file
+            _cmd_file = os.path.join(_tmp, f'del_{pn}.txt')
+            with open(_cmd_file, 'w') as _cf:
+                for _c in _del_cmds:
+                    _cf.write(_c + '\n')
+
+            # Run debugfs with deletion command file — ignore errors (not-found is fine)
+            r = subprocess.run([_debugfs, '-w', '-f', _cmd_file, pp],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode == 0:
+                _modded_any = True
+                _log(f'[+] Files deleted: {pn}', 's')
+            else:
+                # Even if debugfs returns error (some files not found), changes may have been made
+                _log(f'[?] debugfs exit {r.returncode} for {pn} — likely not-found errors', 'i')
+
+            # ── Build.prop injection via debugfs (separate calls for reliability) ──
+            _prop_overrides = [
+                'persist.sys.mdm=0', 'persist.sys.oobe.devicelock=0', 'persist.sys.oobe=0',
+                'persist.sys.oobe_complete=0', 'persist.sys.sim_locked=0',
+                'persist.vendor.mdm=0', 'persist.vendor.sec=0', 'persist.vendor.lock=0',
+                'persist.vendor.sys.mdm=0', 'persist.vendor.sys.security=0',
+                'persist.security.knox=0', 'persist.sys.securitycom=0', 'persist.sys.knox=0',
+                'persist.vendor.knox=0', 'ro.spd.lock=0', 'persist.sys.spd.lock=0',
+                'ro.mdm.enabled=0', 'ro.secfle.deviceowner=0', 'ro.knox.enhanced=0',
+                'ro.transsion.mdm=0', 'persist.vendor.transsion.mdm=0',
+                'persist.sys.phoenix=0', 'ro.phoenix=0', 'ro.transecurity=0',
+                'persist.sys.trancritical=0', 'persist.vendor.transecurity=0',
+                'persist.sys.tne=0', 'ro.tne=0', 'ro.cota=0', 'persist.sys.cota=0',
+                'ro.simlock.onekey=0', 'device_provisioned=1', 'user_setup_complete=1',
+                'ro.setupwizard.mode=DISABLED', 'setup_wizard_completed=1',
+            ]
+            for _prop_path in ['/build.prop', '/default.prop',
+                                '/system/build.prop', '/vendor/build.prop',
+                                '/product/build.prop', '/system_ext/build.prop']:
+                # Read prop file via separate debugfs call
+                r2 = subprocess.run([_debugfs, '-R', f'cat {_prop_path}', pp],
+                                    capture_output=True, text=True, timeout=30)
+                if r2.returncode != 0 or not r2.stdout.strip():
+                    continue
+                # debugfs output: the file content comes first, then a newline + "debugfs" prompt remnant
+                _prop_content = r2.stdout
+                # Strip trailing non-content lines (debugfs sometimes appends status)
+                _lines = _prop_content.split('\n')
+                _clean_lines = []
+                for _l in _lines:
+                    if _l.startswith('debugfs') or _l.startswith('cat:'):
+                        continue
+                    _clean_lines.append(_l)
+                _content = '\n'.join(_clean_lines).strip()
+                if not _content:
+                    continue
+                # Append missing overrides
+                _added = 0
+                _prop_host = os.path.join(_tmp, f'prop_{pn}_{os.path.basename(_prop_path)}')
+                with open(_prop_host, 'w', encoding='utf-8') as _ph:
+                    _ph.write(_content)
+                    if not _content.endswith('\n'):
+                        _ph.write('\n')
+                    for _po in _prop_overrides:
+                        _key = _po.split('=')[0]
+                        if _key not in _content:
+                            _ph.write(f'{_po}\n')
+                            _added += 1
+                if _added > 0:
+                    r3 = subprocess.run([_debugfs, '-w', '-R', f'write {_prop_host} {_prop_path}', pp],
+                                        capture_output=True, text=True, timeout=30)
+                    if r3.returncode == 0:
+                        _modded_any = True
+                        _log(f'[+] Props injected: {_prop_path} (+{_added})', 's')
+                    else:
+                        _log(f'[!] Prop write fail {_prop_path}: {r3.stderr.strip()}', 'w')
+                try: os.remove(_prop_host)
+                except Exception: pass
+
+            # ── Zero AVB magic in this ext4 partition (belt-and-suspenders) ──
+            _avb_zeroed = _zero_avb_magic(pp, _log)
+            if _avb_zeroed:
+                _modded_any = True
+                _log(f'[+] AVB magic zeroed: {pn}', 's')
+
+            # Cleanup cmd file
+            try: os.remove(_cmd_file)
+            except Exception: pass
+
+        if not _modded_any:
+            _log('[!] No modifications made', 'w')
+            return False
+
+        # ── Repack with lpmake ──
+        if not os.path.isfile(_lpmake):
+            _log('[!] lpmake.exe missing — keeping extracted partitions', 'w')
+            return True
+
+        _super_sz = os.path.getsize(super_path)
+        _out = super_path + '.spdfixed'
+        for _sparse_flag in [False, True]:
+            cmd = [_lpmake, '--metadata-size', '65568', '--super-name', 'super',
+                   '--alignment', '4096', '--device', f'super:{_super_sz}',
+                   '--group', f'main:{_super_sz}']
+            for pn in parts:
+                _sz = _orig_sizes.get(pn, os.path.getsize(os.path.join(_tmp, pn)))
+                _name = os.path.splitext(pn)[0]
+                cmd.extend(['--partition', f'{_name}:readonly:{_sz}:main',
+                            '--image', f'{_name}={os.path.join(_tmp, pn)}'])
+            cmd.extend(['--output', _out])
+            if _sparse_flag: cmd.append('--sparse')
+            _log(f'[*] Repacking super...', 'i')
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if r.returncode == 0 and os.path.isfile(_out) and os.path.getsize(_out) > 1024*1024:
+                os.replace(_out, super_path)
+                _log(f'[+] Repacked super with MDM files removed', 's')
+                return True
+            _log(f'[!] lpmake fail, trying fallback...', 'w')
+        return _modded_any
+    except Exception as e:
+        _log(f'[!] SPD FS patch error: {e}', 'w')
+        import traceback
+        _log(traceback.format_exc(), 'w')
+        return False
+    finally:
+        try: shutil.rmtree(_tmp, ignore_errors=True)
+        except Exception: pass
 
 # ─── RemoteAlgorithmEngine — Knox Wizard CompileAssemblyFromSource for Python ───
 # Downloads Python source from remote, compiles & executes at runtime
@@ -1965,9 +3274,13 @@ class MdmKingApp:
 
     def _poll_ui_queue(self):
         try:
-            self.root.after(100, self._poll_ui_queue)
+            self.root.after(50, self._poll_ui_queue)
         except (tk.TclError, AttributeError):
             return
+        try:
+            self.root.update()
+        except Exception:
+            pass
         try:
             with self._ui_queue_lock:
                 items = list(self._ui_queue)
@@ -2451,6 +3764,27 @@ class MdmKingApp:
                     self._adb_path_cache = path_adb
                     return path_adb
         except Exception: pass
+        # Auto-download platform-tools from server
+        try:
+            tools = self._tools_dir()
+            if tools:
+                _pt_dir = os.path.join(tools, 'platform-tools')
+                _adb_exe = os.path.join(_pt_dir, 'adb.exe')
+                if not os.path.isfile(_adb_exe):
+                    self.log('[*] Downloading platform-tools from server...', 'h')
+                    from cloudflare import _download_file
+                    _zip_path = os.path.join(tools, 'pt.zip')
+                    if _download_file('/download/platform-tools.zip', _zip_path):
+                        import zipfile
+                        with zipfile.ZipFile(_zip_path, 'r') as _zf:
+                            _zf.extractall(tools)
+                        os.remove(_zip_path)
+                if os.path.isfile(_adb_exe):
+                    v = subprocess.run([_adb_exe, 'version'], capture_output=True, text=True, timeout=3).stdout
+                    if 'Android Debug Bridge' in v:
+                        self._adb_path_cache = _adb_exe
+                        return _adb_exe
+        except Exception: pass
         self._adb_path_cache = None
         self.log('[!] ADB not found — bypass requires Android platform-tools', 'e')
         self.log('    Download: https://dl.google.com/android/repository/platform-tools-latest-windows.zip', 'e')
@@ -2774,7 +4108,7 @@ class MdmKingApp:
         self._spinner_chars = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 
     def _mtk_load(self):
-        path = filedialog.askopenfilename(title='Select MTK super image', filetypes=[('Super Image', '*.img *.bin'), ('All Files', '*.*')])
+        path = filedialog.askopenfilename(title='Select MTK super image', filetypes=[('Super Image', '*.img *.bin *.bak'), ('All Files', '*.*')])
         if not path: return
         self._mtk_path = path
         sz = os.path.getsize(path)
@@ -2947,6 +4281,15 @@ class MdmKingApp:
         _make_btn(btn_row, 'PATCH MISCDATA', self.c['green'], 'miscdata')
         _make_btn(btn_row, 'PATCH PROINFO', self.c['accent2'], 'proinfo')
 
+        online_row = tk.Frame(card, bg=self.c['card'])
+        online_row.pack(pady=(0, 16))
+        tk.Button(online_row, text='  ONLINE PATCH  ', font=('Segoe UI', 10, 'bold'),
+                  bg=self.c['accent'], fg=self.c['white'], bd=0,
+                  padx=20, pady=8, cursor='hand2',
+                  command=lambda: self._run_thread(self._online_miscdata_patch, 'OnlinePatch')).pack(side=tk.LEFT, padx=8)
+        tk.Label(online_row, text='Download pre-patched binary from server',
+                 font=('Segoe UI', 8), fg=self.c['muted'], bg=self.c['card']).pack(side=tk.LEFT, padx=8)
+
     def _set_icon(self, win):
         if self._ico_path and os.path.isfile(self._ico_path):
             try:
@@ -2969,7 +4312,7 @@ class MdmKingApp:
 
     def _si_select(self, step=1):
         path = filedialog.askopenfilename(title='Select super image',
-            filetypes=[('Super Image', '*.img *.bin'), ('All Files', '*.*')])
+            filetypes=[('Super Image', '*.img *.bin *.bak'), ('All Files', '*.*')])
         if not path: return
         size = os.path.getsize(path)
         self._super_path = path
@@ -3165,15 +4508,14 @@ class MdmKingApp:
             'cancel_attr': '_cancel',
             'label': 'SPD',
         }
-        with self._block_close_ctx():
+        try:
+            self._do_spd_subprocess_patch(path, ctx)
+        except BaseException:
+            import traceback
             try:
-                self._do_auto_super_patch(path, ctx)
-            except BaseException:
-                import traceback
-                try:
-                    with open('mdm_king_crash.log', 'w') as f:
-                        traceback.print_exc(file=f)
-                except Exception: pass
+                with open('mdm_king_crash.log', 'w') as f:
+                    traceback.print_exc(file=f)
+            except Exception: pass
 
     def _hex_scan_ui(self, ctx, pct, count):
         try:
@@ -3198,6 +4540,27 @@ class MdmKingApp:
             ctx['btn'].config(state=tk.NORMAL)
         except tk.TclError:
             pass
+
+    def _smooth_progress(self, bar, label, target):
+        try:
+            cur = bar.cget('value')
+        except tk.TclError:
+            return
+        if cur >= target:
+            return
+        _diff = target - cur
+        _steps = 8
+        _ms = 12
+        def _anim(i=1):
+            try:
+                v = cur + _diff * i / _steps
+                bar.config(value=v)
+                label.config(text=f'{int(v)}%')
+                if i < _steps:
+                    self.root.after(_ms, lambda: _anim(i + 1))
+            except tk.TclError:
+                pass
+        _anim()
 
     def _safe_cleanup(self, ctx):
         try:
@@ -3291,7 +4654,7 @@ class MdmKingApp:
             self._worker_proc = _proc
             _rd = threading.Thread(target=_read_worker, daemon=True)
             _rd.start()
-            _deadline = time.time() + 120
+            _deadline = time.monotonic() + 1800
             while True:
                 if getattr(self, ctx['cancel_attr'], False):
                     _proc.kill()
@@ -3302,7 +4665,7 @@ class MdmKingApp:
                     if _item is None:
                         break
                     _line = _item.strip()
-                    _deadline = time.time() + 120
+                    _deadline = time.monotonic() + 1800
                     if _line.startswith('PROGRESS:'):
                         try:
                             _pct = int(_line[9:])
@@ -3320,7 +4683,7 @@ class MdmKingApp:
                         _proc.kill()
                         self.log('Cancelled by user', 'w')
                         raise RuntimeError('Cancelled')
-                    if time.time() > _deadline:
+                    if time.monotonic() > _deadline:
                         _proc.kill()
                         raise RuntimeError('Worker timed out')
             _rd.join(timeout=5)
@@ -3352,6 +4715,23 @@ class MdmKingApp:
             except Exception:
                 pass
 
+            # Fix AVB/dm-verity on patched super image
+            self._enqueue_ui(lambda: ctx['pct'].config(text='90%'))
+            self._enqueue_ui(lambda: ctx['progress'].config(value=88))
+            self.log('[*] Removing AVB/dm-verity verification...', 'h')
+            try:
+                _fix_avb_dmverity(_final_out, self._tools_dir(), self.log)
+            except Exception as _avbe:
+                self.log(f'[!] AVB fix: {_avbe}', 'o')
+            # Inject anti-relock package-state overrides (disable MDM packages at boot)
+            self.log('[*] Injecting anti-relock package-state overrides...', 'h')
+            try:
+                _fsize = os.path.getsize(_final_out)
+                inject_relock_props(_final_out, _fsize, None, None, self.log)
+            except Exception as _pie:
+                self.log(f'[!] Relock injection: {_pie}', 'o')
+            self._enqueue_ui(lambda: ctx['progress'].config(value=90))
+
             self._enqueue_ui(lambda r=0, fo=_final_out: self._patch_done_ui(ctx, 0, fo))
             out_size = os.path.getsize(_final_out) if os.path.isfile(_final_out) else 0
             setattr(self, ctx['loading_attr'], False)
@@ -3359,31 +4739,12 @@ class MdmKingApp:
             self.log('[!] WIPE /DATA via recovery before flash', 'e')
             self.log('[!] Scorpio updates in /data survive flash', 'e')
             self.log('[!] During setup wizard: SKIP WiFi / NO SIM / NO network — MDM re-locks on server contact', 'e')
+            self.log('[*] DM-Verity: AVB verification disabled — no boot corruption', 's')
             self.log('[*] Flash order (BROM / Pandora / TSM):', 'h')
             self.log('[*]   1. Wipe data (recovery)', 'h')
             self.log('[*]   2. Flash super_KING.bin', 'h')
             self.log('[*]   3. Flash persist', 'h')
 
-            # VBmeta auto-patch — zero flags byte to disable AVB verification safely
-            _vbmeta_dir = os.path.dirname(_orig_src)
-            _vbmeta_found = [f for f in os.listdir(_vbmeta_dir) if f.startswith('vbmeta') and f.endswith('.img') and os.path.isfile(os.path.join(_vbmeta_dir, f))]
-            if _vbmeta_found:
-                for _vbf in _vbmeta_found:
-                    _vbp = os.path.join(_vbmeta_dir, _vbf)
-                    try:
-                        with open(_vbp, 'r+b') as _vf:
-                            _vd = _vf.read()
-                            if len(_vd) < 256:
-                                continue
-                            _aoff = _vd.find(b'AVB0')
-                            if _aoff < 0:
-                                continue
-                            # Zero flags field at offset 123 in AVB0 header — disables hash/signature verification
-                            # This is the standard avbtool --flags 0 approach, safe and non-corrupting
-                            _vf.seek(_aoff + 123)
-                            _vf.write(b'\x00')
-                    except Exception:
-                        pass
             self._enqueue_ui(lambda: self.status_var.set('Done'))
             _trace_log('DONE')
         except KeyboardInterrupt:
@@ -3414,6 +4775,100 @@ class MdmKingApp:
             except Exception: pass
             try: os.remove(_tmp + '.result')
             except Exception: pass
+
+    def _do_spd_subprocess_patch(self, path, ctx):
+        """Patch super using a separate subprocess — file-based IPC (no stdout)."""
+        import json, tempfile, time as _time
+        self.log('[#] DEVICE PATCHING STARTED', 'c')
+        src_size = os.path.getsize(path)
+        self.log(f'[+] {os.path.basename(path)} ({src_size//(1024*1024)} MB)', 's')
+        self._enqueue_ui(lambda: ctx['progress'].config(value=2))
+        self._enqueue_ui(lambda: ctx['pct'].config(text='2%'))
+        _bak = _safe_backup(path)
+        if _bak:
+            self.log(f'[+] Backup: {os.path.basename(_bak)}', 's')
+        else:
+            self.log('[!] Could not create backup', 'w')
+
+        _safe_pats = [(MDM_PATTERNS[i], MDM_PATTERNS[i][0:1] * len(MDM_PATTERNS[i]))
+                      for i in range(len(MDM_PATTERNS)) if len(MDM_PATTERNS[i]) >= 6]
+        _tmp = os.path.join(tempfile.gettempdir(), f'mdm_spd_{int(_time.time())}_{os.getpid()}.json')
+        _status_path = _tmp + '.status'
+        _patch_params = {
+            'path': path,
+            'status_path': _status_path,
+            'pats_hex': [p.hex() for p, _ in _safe_pats],
+            'reps_hex': [r.hex() for _, r in _safe_pats],
+        }
+        with open(_tmp, 'w') as f: json.dump(_patch_params, f)
+
+        self._enqueue_ui(lambda: ctx['progress'].config(value=5))
+        self._enqueue_ui(lambda: ctx['pct'].config(text='5%'))
+        self._block_close = True
+
+        try:
+            import subprocess as _sp
+            if getattr(sys, 'frozen', False):
+                _cmd = [sys.executable, '--spd-patch-worker', _tmp]
+            else:
+                _py = sys.executable or 'python'
+                if _py and _py.lower().endswith('pythonw.exe'):
+                    _py = _py[:-5] + 'python.exe'
+                _cmd = [_py, os.path.abspath(__file__), '--spd-patch-worker', _tmp]
+            _proc = _sp.Popen(_cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                              creationflags=0x08000000 if sys.platform == 'win32' else 0)
+
+            _deadline = _time.monotonic() + 3600
+            _last_log = ''
+            while True:
+                if getattr(self, '_cancel', False):
+                    _proc.kill()
+                    self.log('Cancelled by user', 'w')
+                    break
+                if _proc.poll() is not None:
+                    break
+                if _time.monotonic() > _deadline:
+                    _proc.kill()
+                    self.log('Worker timed out after 1 hour', 'e')
+                    break
+                try:
+                    with open(_status_path) as _sf:
+                        _s = json.load(_sf)
+                except Exception:
+                    _time.sleep(0.05)
+                    continue
+                _pct = _s.get('pct')
+                if _pct is not None:
+                    self._enqueue_ui(lambda p=_pct: self._smooth_progress(ctx['progress'], ctx['pct'], p))
+                _log_msg = _s.get('log', '')
+                if _log_msg and _log_msg != _last_log:
+                    _last_log = _log_msg
+                    self._enqueue_ui(lambda m=_log_msg, t=_s.get('level', 'i'): self.log(m, t))
+                _time.sleep(0.05)
+
+            _proc.wait(timeout=10)
+            if _proc.returncode != 0 and _proc.returncode is not None:
+                self.log(f'[!] Patching failed (exit {_proc.returncode})', 'e')
+                self._enqueue_ui(lambda: ctx['progress'].config(value=0))
+                self._enqueue_ui(lambda: self.status_var.set('Error'))
+            else:
+                self._enqueue_ui(lambda: ctx['progress'].config(value=95))
+                self._enqueue_ui(lambda: ctx['pct'].config(text='95%'))
+                self._enqueue_ui(lambda: ctx['progress'].config(value=100))
+                self._enqueue_ui(lambda: ctx['pct'].config(text='100%'))
+                out_size = os.path.getsize(path) if os.path.isfile(path) else 0
+                setattr(self, ctx['loading_attr'], False)
+                self.log(f'[+] Site leveled ({out_size//(1024*1024)} MB)', 's')
+                self.log('[!] Wipe /data in recovery before flashing', 'e')
+                self.log('[!] Flash super.bin only — no other images needed', 'h')
+                self._enqueue_ui(lambda: self.status_var.set('Finished'))
+                self._enqueue_ui(lambda r=0, fo=path: self._patch_done_ui(ctx, 0, fo))
+        finally:
+            self._enqueue_ui(lambda: setattr(self, '_block_close', False))
+        try: os.remove(_tmp)
+        except Exception: pass
+        try: os.remove(_status_path)
+        except Exception: pass
 
     def _do_multipart_super_patch(self, partitions, orig_super, ctx):
         """Patch multiple extracted partitions and repack with lpmake."""
@@ -3557,15 +5012,8 @@ class MdmKingApp:
             self.log('BYPASSING', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MDM APP', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'] + ['com.android.vending'])
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'MDM App bypass error: {_e}', 'e')
             import traceback as _tb
@@ -3577,7 +5025,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, 'MDM APP BYPASS COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MDM App bypass complete'))
 
@@ -3589,25 +5037,48 @@ class MdmKingApp:
         if not path: return
         self.root.after(0, lambda: self.log_text.delete('1.0', tk.END))
         self.log_section(f'{part_type.upper()} Patcher', 2)
-        self.log(f'File: {os.path.basename(path)} ({os.path.getsize(path)} bytes)', 'i')
+        _fsize = os.path.getsize(path)
+        self.log(f'File: {os.path.basename(path)} ({_fsize} bytes)', 'i')
+        
+        # Sanity checks
+        if _fsize == 0:
+            self.log('ERROR: File is empty', 'e'); return
+        if part_type == 'proinfo' and _fsize < 1024:
+            self.log('WARNING: Proinfo smaller than expected (min 1KB)', 'w')
+        if part_type == 'miscdata' and _fsize > 65536:
+            self.log('WARNING: Miscdata unusually large, verify this is a correct dump', 'w')
         
         with open(path, 'rb') as f: data = bytearray(f.read())
-        
+        _orig = data[:]
         fsize = len(data)
         patches = 0
         
-        # ── Stage 1: Known lock byte offsets (surgical, only proven lock positions) ──
+        # Create backup
+        bak = os.path.splitext(path)[0] + '_backup.bin'
+        if not os.path.isfile(bak):
+            with open(bak, 'wb') as f: f.write(_orig)
+            self.log(f'Backup saved: {os.path.basename(bak)}', 's')
+        
+        # ── Stage 1: Known lock byte offsets (only known lock values 0x01/0x02/0xFF) ──
         lock_offsets = [0x004, 0x005, 0x006, 0x007, 0x200, 0x201, 0x202, 0x203,
-                        0x208, 0x209, 0x20A, 0x20B, 0x210, 0x211, 0x212, 0x213,
-                        0x300, 0x301, 0x302, 0x303, 0x3F0, 0x3F1, 0x3F2, 0x3F3]
+                        0x208, 0x209, 0x20A, 0x20B, 0x20C, 0x20D,
+                        0x210, 0x211, 0x212, 0x213, 0x300, 0x301, 0x302, 0x303,
+                        0x3F0, 0x3F1, 0x3F2, 0x3F3, 0x40C, 0x40D, 0x40E, 0x40F]
         for off in lock_offsets:
-            if off < fsize and data[off] != 0:
+            if off < fsize and data[off] in (1, 2, 0xFF):
                 patches += 1; data[off] = 0
         
-        # ── Stage 2: Lock-related strings (only exact lock flag strings, no broad matches) ──
-        all_patterns = [b'region_lock', b'REGION_LOCK', b'regionlock', b'REGIONLOCK',
-                        b'region_lock_flag', b'REGION_LOCK_FLAG',
-                        b'country_lock', b'COUNTRY_LOCK', b'countrylock', b'COUNTRYLOCK',
+        # ── Stage 2: Lock-related strings (context-validated to avoid binary false positives) ──
+        def _is_text_context(d, pos):
+            """Check if position is in ASCII text context (surrounded by printable chars or nulls)."""
+            start = max(0, pos - 4)
+            end = min(len(d), pos + 32)
+            ctx = d[start:end]
+            printable = sum(1 for b in ctx if 0x20 <= b <= 0x7E or b == 0)
+            return printable >= len(ctx) * 0.7
+        
+        all_patterns = [b'region_lock', b'REGION_LOCK', b'region_lock_flag', b'REGION_LOCK_FLAG',
+                        b'country_lock', b'COUNTRY_LOCK',
                         b'sim_lock', b'SIM_LOCK', b'simlock', b'SIMLOCK',
                         b'sec_lock', b'SEC_LOCK', b'seclock',
                         b'mdm_lock', b'MDM_LOCK', b'mdm_state', b'mdm_locked', b'mdm_active',
@@ -3620,10 +5091,50 @@ class MdmKingApp:
             while True:
                 idx = data.find(st, idx)
                 if idx == -1: break
+                if not _is_text_context(data, idx):
+                    idx += 1
+                    continue
                 patches += 1
                 for i in range(len(st)):
                     if idx + i < fsize: data[idx + i] = 0
-                idx += 1
+                # Also zero adjacent non-printable delimiters (typically 0xFF or 0x00 framing)
+                for adj in [-1, len(st)]:
+                    if 0 <= idx + adj < fsize and data[idx + adj] in (0xFF, 0xFE):
+                        data[idx + adj] = 0
+                        patches += 1
+                idx += len(st)
+        
+        # ── Stage 3: Patch proinfo XOR checksums after modification (NV item format) ──
+        if part_type == 'proinfo' and patches > 0:
+            _cksum_fixed = 0
+            _pos = 0
+            while _pos + 4 < fsize:
+                _nidx = data[_pos] | (data[_pos+1] << 8)
+                _nsize = data[_pos+2] | (data[_pos+3] << 8)
+                if _nidx == 0 and _nsize == 0:
+                    _pos += 1; continue
+                if _nsize < 1 or _nsize > 2048 or _pos + 4 + _nsize > fsize:
+                    _pos += 1; continue
+                _item_end = _pos + 4 + _nsize
+                if _item_end > fsize: break
+                _calc = 0
+                for _b in data[_pos:_item_end]:
+                    _calc ^= _b
+                if _calc != 0:
+                    # Fix checksum byte (last byte of NV item)
+                    if _item_end - 1 < fsize:
+                        data[_item_end - 1] ^= _calc
+                        _cksum_fixed += 1
+                _pos = _item_end
+            if _cksum_fixed:
+                self.log(f'Fixed {_cksum_fixed} NV item checksums in proinfo', 's')
+        
+        # Verify changes are safe — ensure we didn't zero critical partition header
+        if patches > 0 and _orig[:16] != data[:16]:
+            self.log('WARNING: First 16 bytes changed — partition header may be corrupted!', 'e')
+            self.log('Reverting to original — patch offsets may be wrong for this firmware', 'e')
+            data = _orig
+            patches = 0
         
         if patches == 0:
             self.log('No lock flags found — device may already be patched', 'w')
@@ -3635,6 +5146,57 @@ class MdmKingApp:
         self.log_ok(f'Saved: {os.path.basename(out)}')
         self.log('Flash this file back using TSM/Pandora Partition Manager', 'i')
         self.log('Path: Proinfo/Miscdata → Write partition → Select patched file', 'i')
+
+    def _online_miscdata_patch(self):
+        if not self._ensure_active(): return
+        path = filedialog.askopenfilename(title='Select dumped miscdata or proinfo .bin file',
+            filetypes=[('Binary dump', '*.bin'), ('All files', '*.*')])
+        if not path: return
+        self.root.after(0, lambda: self.log_text.delete('1.0', tk.END))
+        self.log_section('ONLINE PATCH', 2)
+        _bn = os.path.basename(path)
+        _fsize = os.path.getsize(path)
+        self.log(f'File: {_bn} ({_fsize} bytes)', 'i')
+        _name_lower = _bn.lower()
+        if 'proinfo' in _name_lower:
+            _part = 'proinfo'
+        elif 'miscdata' in _name_lower or 'misc' in _name_lower:
+            _part = 'miscdata'
+        else:
+            _part = ''
+            self.log('Could not detect partition type from filename, trying miscdata', 'w')
+            _part = 'miscdata'
+        _url = f'https://remove.mdmfile.com/bin/{_part}'
+        self.log(f'Downloading patched binary from server...', 'i')
+        self._enqueue_ui(lambda: self.root.update())
+        _tmp = os.path.join(tempfile.gettempdir(), f'mdm_online_{_part}_{int(time.time())}.bin')
+        try:
+            _req = urllib.request.Request(_url, headers={'User-Agent': 'MDM-King/2.0'})
+            with urllib.request.urlopen(_req, timeout=30) as _resp:
+                _dl_data = _resp.read()
+            if not _dl_data or len(_dl_data) < 64:
+                self.log(f'Server returned invalid data ({len(_dl_data)} bytes)', 'e'); return
+            self.log(f'Downloaded {len(_dl_data)} bytes from server', 's')
+            with open(_tmp, 'wb') as f: f.write(_dl_data)
+            # Backup original
+            _bak = os.path.splitext(path)[0] + '_backup.bin'
+            if not os.path.isfile(_bak):
+                with open(_bak, 'wb') as f:
+                    with open(path, 'rb') as _src: f.write(_src.read())
+                self.log(f'Backup saved: {os.path.basename(_bak)}', 's')
+            # Replace original with downloaded patched binary
+            with open(path, 'wb') as f: f.write(_dl_data)
+            self.log_ok(f'Online patch applied — {os.path.basename(path)} replaced with server version')
+            self.log('Flash this file back using TSM/Pandora Partition Manager', 'i')
+        except urllib.error.HTTPError as _he:
+            self.log(f'Server error: {_he.code} {_he.reason}', 'e')
+        except urllib.error.URLError as _ue:
+            self.log(f'Network error: {_ue.reason}', 'e')
+        except Exception as _e:
+            self.log(f'Online patch failed: {_e}', 'e')
+        finally:
+            try: os.remove(_tmp)
+            except Exception: pass
 
     def nokia_tool(self):
         self.log('Nokia Tool', 'c')
@@ -3752,6 +5314,13 @@ class MdmKingApp:
             flags = 0x08000000
             adb = self._find_adb()
             tools = self._tools_dir()
+            if not tools:
+                self.log('[#] Downloading tools from server...', 'h')
+                from cloudflare import init_cloudflare_assets as _init_cf
+                _init_cf()
+                tools = self._tools_dir()
+                if tools:
+                    self.log('[+] Tools ready', 's')
             r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
             devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l and 'unauthorized' not in l]
             if not devs:
@@ -3781,6 +5350,11 @@ class MdmKingApp:
             for _n in ['mdm_king_admin_signed.apk', 'mdm_king_admin.apk']:
                 _p = os.path.join(tools, _n)
                 if os.path.isfile(_p): apk = _p; break
+            if apk is None:
+                from cloudflare import _ensure_admin_apk
+                _dl = _ensure_admin_apk(tools)
+                if _dl and os.path.isfile(_dl):
+                    apk = _dl
             apk_ok = False
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
@@ -3850,8 +5424,9 @@ class MdmKingApp:
                 'appops set com.mdmking.admin AUTO_START allow 2>/dev/null'],
                 timeout=10, capture_output=True, creationflags=flags)
 
-            # 5) Disable MDM/black screen packages (keep Play Store!)
-            all_pkgs = [p for p in (CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk']) if 'vending' not in p]
+            # 5) Disable MDM/black screen packages
+            all_pkgs = [p for p in (CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'])
+                        if 'vending' not in p]
             for entry in all_pkgs:
                 if '/' in entry:
                     comp = entry.replace('\\', '')
@@ -3870,24 +5445,7 @@ class MdmKingApp:
                     'lockscreen_service cybercat_acbridge oobe_daemon 2>/dev/null'],
                     timeout=5, capture_output=True, creationflags=flags)
                 time.sleep(0.3)
-            subprocess.run([adb, '-s', s, 'shell',
-                'pm disable-user --user 0 com.scorpio.securitycom 2>/dev/null; '
-                'pm disable com.scorpio.securitycom 2>/dev/null; '
-                'pm hide com.scorpio.securitycom 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securitycompanion 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securityplugin 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securityservice 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securityupdate 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securitymonitor 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.secureconfig 2>/dev/null; '
-                'pm disable-user --user 0 com.scorpio.securitywatchdog 2>/dev/null; '
-                'pm disable-user --user 0 com.transsion.safecenter 2>/dev/null; '
-                'pm disable-user --user 0 com.tecno.safecenter 2>/dev/null; '
-                'pm disable-user --user 0 com.infinix.safecenter 2>/dev/null; '
-                'pm disable-user --user 0 com.itel.safecenter 2>/dev/null; '
-                'pm disable-user --user 0 com.transsion.securityplugin 2>/dev/null; '
-                'pm disable-user --user 0 com.transsion.mdm 2>/dev/null'],
-                timeout=10, capture_output=True, creationflags=flags)
+            # Skip pm disable — triggers kernel-level watchdog lock on SPD devices
 
             # 5c) Block MDM DNS + lock DNS settings
             try:
@@ -3954,6 +5512,10 @@ class MdmKingApp:
             self.log('BlackScreen fix complete! Device should boot normally now.', 's')
         except Exception as e:
             self.log(f'BlackScreen error: {e}', 'e')
+        finally:
+            try:
+                subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True)
+            except Exception: pass
 
     def _adb_bypass_core(self, label, purge_pkgs, disable_only=None, skip_airplane=False, device_serial=None, skip_reboot=False, disable_pkgs=False, quiet=False, uninstall_pkgs=None):
         """Run ADB bypass core — wrapped in try/except so thread exceptions are logged, not silent."""
@@ -3961,6 +5523,13 @@ class MdmKingApp:
             _owner_ok = False
             flags = 0x08000000
             tools = self._tools_dir()
+            if not tools:
+                self.log('[#] Downloading tools from server...', 'h')
+                from cloudflare import init_cloudflare_assets as _init_cf
+                _init_cf()
+                tools = self._tools_dir()
+                if tools:
+                    self.log('[+] Tools ready', 's')
             adb = None
             for _p in [r'C:\Program Files\platform-tools\adb.exe', self._find_adb()]:
                 if _p and os.path.isfile(_p):
@@ -4047,13 +5616,19 @@ class MdmKingApp:
                 if os.path.isfile(_path):
                     apk = _path
                     break
-            if apk is None and not quiet:
-                self.log_warn('No admin APK found in tools directory')
+            if apk is None:
+                from cloudflare import _ensure_admin_apk
+                _dl = _ensure_admin_apk(tools)
+                if _dl and os.path.isfile(_dl):
+                    apk = _dl
+                elif not quiet:
+                    self.log_warn('No admin APK found in tools directory')
             apk_ok = False
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
                 apk_ok = True
             if apk and os.path.isfile(apk) and not apk_ok:
+                self._ensure_apk_signed(apk)
                 for i, args in enumerate([
                     [adb, '-s', s, 'install', '-r', '-d', apk],
                     [adb, '-s', s, 'install', '-r', '-d', '--bypass-low-target-sdk-block', apk],
@@ -4076,10 +5651,18 @@ class MdmKingApp:
             # ── Install Aurora Store early (before lockdown/airplane mode) ──
             try:
                 subprocess.run([adb, '-s', s, 'shell', 'appops set com.android.shell REQUEST_INSTALL_PACKAGES allow 2>/dev/null'],
-                               capture_output=True, creationflags=flags)
+                               capture_output=True, timeout=10, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell', 'appops set com.android.shell INSTALL_PACKAGES allow 2>/dev/null'],
-                               capture_output=True, creationflags=flags)
-                for _aux in ['aurora-clean.apk', 'aurora-store.apk', 'AuroraStore.apk', 'Aurora.apk', 'aurora_store.apk']:
+                               capture_output=True, timeout=10, creationflags=flags)
+                _aurora_names = ['aurora-clean.apk', 'aurora-store.apk', 'AuroraStore.apk', 'Aurora.apk', 'aurora_store.apk']
+                _aurora_found = any(os.path.isfile(os.path.join(tools, _a)) for _a in _aurora_names)
+                if not _aurora_found:
+                    from cloudflare import _download_file as _dl_aurora
+                    for _a in _aurora_names:
+                        _dl_path = os.path.join(tools, _a)
+                        if _dl_aurora('/download/apk/' + _a, _dl_path):
+                            break
+                for _aux in _aurora_names:
                     _aux_path = os.path.join(tools, _aux)
                     if not os.path.isfile(_aux_path):
                         continue
@@ -4134,7 +5717,7 @@ class MdmKingApp:
                         'killall -9 ' + ' 2>/dev/null; killall -9 '.join(batch) + ' 2>/dev/null'],
                         timeout=10, capture_output=True, creationflags=flags)
             _kill(adb, s)
-            subprocess.run([adb, '-s', s, 'shell',
+            _iptables_rules = (
                 'iptables -A OUTPUT -m string --string "knox" --algo bm -j DROP 2>/dev/null; '
                 'iptables -A OUTPUT -m string --string "samsungdm" --algo bm -j DROP 2>/dev/null; '
                 'iptables -A OUTPUT -m string --string "scorpio" --algo bm -j DROP 2>/dev/null; '
@@ -4152,46 +5735,53 @@ class MdmKingApp:
                 'iptables -A OUTPUT -m string --string "safecenter" --algo bm -j DROP 2>/dev/null; '
                 'iptables -A OUTPUT -m string --string "phasecheck" --algo bm -j DROP 2>/dev/null; '
                 'iptables -A OUTPUT -m string --string "trancritical" --algo bm -j DROP 2>/dev/null; '
-                'iptables -A OUTPUT -m string --string "transecurity" --algo bm -j DROP 2>/dev/null'],
-                timeout=10, capture_output=True, creationflags=flags)
+                'iptables -A OUTPUT -m string --string "transecurity" --algo bm -j DROP 2>/dev/null'
+            )
+            for _ipt_retry in range(3):
+                _r_ipt = subprocess.run([adb, '-s', s, 'shell', _iptables_rules],
+                    timeout=10, capture_output=True, creationflags=flags)
+                if _r_ipt.returncode == 0 or _r_ipt.returncode == 1:
+                    break
+                time.sleep(1)
             _adb_block_dns(adb, s, flags=flags)
             _kill(adb, s)
 
             # 1) Check if admin is already device owner — skip if so
             _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
             _do_check = subprocess.run([adb, '-s', s, 'shell',
-                'dumpsys device_policy 2>/dev/null | grep -E "Device Owner:.*com\\.mdmking\\.admin"'],
+                'dumpsys device_policy 2>/dev/null | grep -iE "Device Owner:|device_owner:.*com\\.mdmking\\.admin"'],
                 capture_output=True, text=True, timeout=5, creationflags=flags).stdout.strip()
+            _is_seccom = any('scorpio' in p or 'securitycom' in p or 'transsion.security' in p for p in (purge_pkgs or []))
             if _do_check:
                 _owner_ok = True
             else:
                 # 1.5) AGGRESSIVE SecurityCom kill — repeated kills with delays
                 for _kill_round in range(5):
+                    _kill_targets = 'transsion.security tee_service scorpio_security '
+                    _kill_targets += 'securityplugin SecurityPlugin scorpiod security_daemon scorpio_security '
+                    _kill_targets += 'scorpio transsion_daemon phoenixd phoenix_daemon '
+                    _kill_targets += 'lockscreen_service cybercat_acbridge oobe_daemon'
+                    if _is_seccom:
+                        _kill_targets = 'security ' + _kill_targets
                     subprocess.run([adb, '-s', s, 'shell',
-                        'killall -9 security transsion.security tee_service scorpio_security '
-                        'securityplugin SecurityPlugin scorpiod security_daemon scorpio_security '
-                        'scorpio security transsion_daemon phoenixd phoenix_daemon '
-                        'lockscreen_service cybercat_acbridge oobe_daemon 2>/dev/null'],
+                        f'killall -9 {_kill_targets} 2>/dev/null'],
                         timeout=5, capture_output=True, creationflags=flags)
                     time.sleep(0.3)
-                # Disable SecurityCom + SafeCenter + ALL lock packages
+                # Force-disable SecurityCom — kill and disable before it can respawn
+                _kill_targets2 = 'transsion.security scorpio_security securityplugin SecurityPlugin scorpiod security_daemon scorpio'
+                if _is_seccom:
+                    _kill_targets2 = 'security ' + _kill_targets2
                 subprocess.run([adb, '-s', s, 'shell',
+                    f'killall -9 {_kill_targets2} 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securitycom 2>/dev/null; '
                     'pm disable com.scorpio.securitycom 2>/dev/null; '
-                    'pm hide com.scorpio.securitycom 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securitycompanion 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securityplugin 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securityservice 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securityupdate 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.securitymonitor 2>/dev/null; '
                     'pm disable-user --user 0 com.scorpio.secureconfig 2>/dev/null; '
-                    'pm disable-user --user 0 com.scorpio.securitywatchdog 2>/dev/null; '
-                    'pm disable-user --user 0 com.transsion.safecenter 2>/dev/null; '
-                    'pm disable-user --user 0 com.tecno.safecenter 2>/dev/null; '
-                    'pm disable-user --user 0 com.infinix.safecenter 2>/dev/null; '
-                    'pm disable-user --user 0 com.itel.safecenter 2>/dev/null; '
-                    'pm disable-user --user 0 com.transsion.securityplugin 2>/dev/null; '
-                    'pm disable-user --user 0 com.transsion.mdm 2>/dev/null'],
+                    'pm hide com.scorpio.securitycom 2>/dev/null'],
                     timeout=10, capture_output=True, creationflags=flags)
                 # Clear recovery flags
                 subprocess.run([adb, '-s', s, 'shell',
@@ -4204,8 +5794,18 @@ class MdmKingApp:
                     'pm disable --user 0 com.google.android.gsf 2>/dev/null; '
                     'pm clear com.google.android.gms 2>/dev/null; '
                     'pm clear com.google.android.gsf 2>/dev/null; '
+                    'pm disable-user --user 0 com.google.android.gms 2>/dev/null; '
+                    'pm disable-user --user 0 com.google.android.gsf 2>/dev/null; '
+                    'pm uninstall --user 0 com.google.android.gms 2>/dev/null; '
+                    'pm uninstall --user 0 com.google.android.gsf 2>/dev/null; '
                     'settings put secure backup_transport null 2>/dev/null; '
                     'settings put global stay_on_while_plugged_in 3 2>/dev/null'],
+                    timeout=15, capture_output=True, creationflags=flags)
+                subprocess.run([adb, '-s', s, 'shell',
+                    'accounts remove com.google 2>/dev/null; '
+                    'pm list users 2>/dev/null | grep -o "{[0-9]*}" | tr -d "{}" | while read u; do '
+                    'pm disable --user $u com.google.android.gms 2>/dev/null; '
+                    'pm clear --user $u com.google.android.gms 2>/dev/null; done'],
                     timeout=15, capture_output=True, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell', 'true'], timeout=3, capture_output=True, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell', 'dpm remove-active-admin com.mdmking.admin/.MyAdminReceiver 2>/dev/null'],
@@ -4213,16 +5813,21 @@ class MdmKingApp:
                 # 4) Try device owner — AGGRESSIVE with SecurityCom kills between retries
                 for _attempt in range(6):
                     # Kill SecurityCom before each attempt
+                    _kill_targets3 = 'transsion.security tee_service scorpio_security '
+                    _kill_targets3 += 'securityplugin SecurityPlugin scorpiod security_daemon'
+                    if _is_seccom:
+                        _kill_targets3 = 'security ' + _kill_targets3
                     subprocess.run([adb, '-s', s, 'shell',
-                        'killall -9 security transsion.security tee_service scorpio_security '
-                        'securityplugin SecurityPlugin scorpiod security_daemon 2>/dev/null'],
+                        f'killall -9 {_kill_targets3} 2>/dev/null'],
                         timeout=5, capture_output=True, creationflags=flags)
                     time.sleep(0.5)
                     # Try all dpm commands
                     for _cmd in [
                         f'dpm set-device-owner --user 0 {_adm_comp}',
+                        f'dpm set-device-owner --user current {_adm_comp}',
                         f'dpm set-device-owner {_adm_comp}',
                         f'dpm set-profile-owner --user 0 {_adm_comp}',
+                        f'dpm set-profile-owner --user current {_adm_comp}',
                         f'dpm set-profile-owner {_adm_comp}',
                     ]:
                         r = subprocess.run([adb, '-s', s, 'shell', f'{_cmd} 2>&1'], timeout=30, capture_output=True, text=True, creationflags=flags)
@@ -4232,9 +5837,11 @@ class MdmKingApp:
                             break
                         elif 'SecurityCom' in _out:
                             if not quiet: self.log(f'[SECURITY] Attempt {_attempt+1}/6 — blocked by SecurityCom, killing and retrying...', 'w')
-                            # Extra aggressive kill
+                            # Targeted SecurityCom kill
                             subprocess.run([adb, '-s', s, 'shell',
-                                'killall -9 $(ps -A 2>/dev/null | grep -i secur | awk \'{print $2}\') 2>/dev/null'],
+                                'killall -9 security transsion.security scorpio_security '
+                                'securityplugin SecurityPlugin scorpiod security_daemon '
+                                'scorpio securitycom 2>/dev/null'],
                                 timeout=5, capture_output=True, creationflags=flags)
                             time.sleep(1)
                             continue
@@ -4247,8 +5854,10 @@ class MdmKingApp:
                     if not quiet: self.log('[FALLBACK] Trying su-based device owner...', 'w')
                     for _su_cmd in [
                         f'su -c "dpm set-device-owner --user 0 {_adm_comp}"',
+                        f'su -c "dpm set-device-owner --user current {_adm_comp}"',
                         f'su -c "dpm set-device-owner {_adm_comp}"',
                         f'su 0 dpm set-device-owner --user 0 {_adm_comp}',
+                        f'su 0 dpm set-device-owner --user current {_adm_comp}',
                         f'su 0 dpm set-device-owner {_adm_comp}',
                     ]:
                         r = subprocess.run([adb, '-s', s, 'shell', f'{_su_cmd} 2>&1'], timeout=30, capture_output=True, text=True, creationflags=flags)
@@ -4305,8 +5914,9 @@ class MdmKingApp:
                         _installed.add(l.split('package:', 1)[1].strip())
                 _present = [p for p in purge_pkgs if p in _installed]
                 if _present:
+                    _safe_present = _present
                     subprocess.run([adb, '-s', s, 'shell',
-                        '; '.join(f'am force-stop {p} 2>/dev/null; pm disable-user --user 0 {p} 2>/dev/null; pm disable {p} 2>/dev/null' for p in _present)],
+                        '; '.join(f'am force-stop {p} 2>/dev/null; pm disable-user --user 0 {p} 2>/dev/null; pm disable {p} 2>/dev/null' for p in _safe_present)],
                         timeout=60, capture_output=True, creationflags=flags)
             if disable_only:
                 disable_cmds = []
@@ -4330,11 +5940,14 @@ class MdmKingApp:
             # ── Lockdown: block all MDM escape routes ──
             _kill(adb, s)
             # Aggressive SecurityCom kill in lockdown
+            _lockdown_kill_targets = 'transsion.security tee_service scorpio_security '
+            _lockdown_kill_targets += 'securityplugin SecurityPlugin scorpiod security_daemon '
+            _lockdown_kill_targets += 'transsion_daemon phoenixd phoenix_daemon'
+            if _is_seccom:
+                _lockdown_kill_targets = 'security ' + _lockdown_kill_targets
             for _lockdown_kill in range(3):
                 subprocess.run([adb, '-s', s, 'shell',
-                    'killall -9 security transsion.security tee_service scorpio_security '
-                    'securityplugin SecurityPlugin scorpiod security_daemon '
-                    'transsion_daemon phoenixd phoenix_daemon 2>/dev/null'],
+                    f'killall -9 {_lockdown_kill_targets} 2>/dev/null'],
                     timeout=5, capture_output=True, creationflags=flags)
                 time.sleep(0.3)
             subprocess.run([adb, '-s', s, 'shell',
@@ -4352,23 +5965,24 @@ class MdmKingApp:
                 'iptables -A OUTPUT -m string --string "transecurity" --algo bm -j DROP 2>/dev/null'],
                 timeout=10, capture_output=True, creationflags=flags)
             _adb_block_dns(adb, s, flags=flags)
-            # Disable ALL known MDM/lock packages (prevents relock from any brand)
-            _lockdown_pkgs = (CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] +
-                              CHIPSET_PACKAGES['mtk'])
+            # Disable all known MDM/lock packages from chipset lists
+            _lockdown_pkgs = []
+            for _lp in (purge_pkgs or []):
+                if '/' in _lp: continue
+                _lockdown_pkgs.append(_lp)
             _ld_cmds = []
             for _lp in _lockdown_pkgs:
-                if '/' in _lp: _lp = _lp.split('/')[0]
                 _ld_cmds.append(f'pm disable-user --user 0 {_lp} 2>/dev/null')
                 _ld_cmds.append(f'pm hide {_lp} 2>/dev/null')
             for _batch_start in range(0, len(_ld_cmds), 10):
                 subprocess.run([adb, '-s', s, 'shell', '; '.join(_ld_cmds[_batch_start:_batch_start+10])],
                     timeout=30, capture_output=True, creationflags=flags)
-            # Final SecurityCom disable + kill + anti-relock props
+            # Final SecurityCom kill + anti-relock props (no pm disable — triggers relock)
+            _final_kill = 'transsion.security tee_service scorpio_security'
+            if _is_seccom:
+                _final_kill = 'security ' + _final_kill
             subprocess.run([adb, '-s', s, 'shell',
-                'pm disable-user --user 0 com.scorpio.securitycom 2>/dev/null; '
-                'pm disable com.scorpio.securitycom 2>/dev/null; '
-                'pm hide com.scorpio.securitycom 2>/dev/null; '
-                'killall -9 security transsion.security tee_service scorpio_security 2>/dev/null; '
+                f'killall -9 {_final_kill} 2>/dev/null; '
                 'setprop persist.sys.recovery_mode 0 2>/dev/null; '
                 'setprop persist.vendor.recovery.mode 0 2>/dev/null; '
                 'setprop persist.sys.mdm 0 2>/dev/null; '
@@ -4556,15 +6170,8 @@ class MdmKingApp:
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('SPD', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'],
                 disable_pkgs=True, quiet=False, uninstall_pkgs=['com.android.vending'])
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'SPD bypass error: {_e}', 'e')
             import traceback as _tb
@@ -4575,7 +6182,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, 'SPD BYPASS NEW METHOD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — SPD Bypass New Method complete'))
     
@@ -4606,15 +6213,8 @@ class MdmKingApp:
             self.log('BYPASSING', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MTK', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['mtk'], quiet=False, uninstall_pkgs=['com.android.vending'])
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'MTK bypass error: {_e}', 'e')
             import traceback as _tb
@@ -4625,7 +6225,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, 'MTK BYPASS NEW METHOD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MTK Bypass New Method complete'))
 
@@ -4657,15 +6257,8 @@ class MdmKingApp:
             self.log('BYPASSING', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MTK 2024', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['mtk'], quiet=False, uninstall_pkgs=['com.android.vending'])
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'MTK 2024 bypass error: {_e}', 'e')
             import traceback as _tb
@@ -4676,7 +6269,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, 'MTK BYPASS 2024 COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — MTK Bypass 2024 complete'))
 
@@ -4695,12 +6288,12 @@ class MdmKingApp:
 
         # Keep phone awake + prevent lock during bypass
         subprocess.run([adb, '-s', s, 'shell',
-            'svc power stayon true 2>/dev/null; '
-            'settings put global stay_on_while_plugged_in 3 2>/dev/null; '
-            'settings put system screen_off_timeout 1800000 2>/dev/null; '
-            'settings put secure lockscreen.disabled 1 2>/dev/null; '
-            'wm dismiss-keyguard 2>/dev/null'],
-            timeout=5, capture_output=True, creationflags=flags)
+        'svc power stayon true 2>/dev/null; '
+        'settings put global stay_on_while_plugged_in 3 2>/dev/null; '
+        'settings put system screen_off_timeout 1800000 2>/dev/null; '
+        'settings put secure lockscreen.disabled 1 2>/dev/null; '
+        'wm dismiss-keyguard 2>/dev/null'],
+        timeout=5, capture_output=True, creationflags=flags)
 
         # ── Phase 1: Read device info ──
         raw = ''
@@ -4845,6 +6438,11 @@ class MdmKingApp:
             for _n in ['mdm_king_admin_signed.apk', 'mdm_king_admin.apk']:
                 _p = os.path.join(tools, _n)
                 if os.path.isfile(_p): apk = _p; break
+            if apk is None:
+                from cloudflare import _ensure_admin_apk
+                _dl = _ensure_admin_apk(tools)
+                if _dl and os.path.isfile(_dl):
+                    apk = _dl
             apk_ok_pre = False
             _r_pre = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (_r_pre.stdout or ''):
@@ -4854,14 +6452,24 @@ class MdmKingApp:
                 self._ensure_apk_signed(apk)
             elif not apk_ok_pre:
                 self.log('Admin APK not found in tools/ and not installed — bypass may fail', 'w')
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global auto_blocker_enabled 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put secure auto_blocker_enabled 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global auto_blocker_enabled_v2 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put secure samsung_auto_blocker 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global samsung_auto_blocker 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'device_config put security auto_blocker_enabled false 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global package_verifier_enable 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global verifier_verify_adb_installs 0 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
+            for _ab_retry in range(3):
+                subprocess.run([adb, '-s', s, 'shell',
+                    'settings put global auto_blocker_enabled 0 2>/dev/null; '
+                    'settings put secure auto_blocker_enabled 0 2>/dev/null; '
+                    'settings put global auto_blocker_enabled_v2 0 2>/dev/null; '
+                    'settings put secure samsung_auto_blocker 0 2>/dev/null; '
+                    'settings put global samsung_auto_blocker 0 2>/dev/null; '
+                    'device_config put security auto_blocker_enabled false 2>/dev/null; '
+                    'settings put global package_verifier_enable 0 2>/dev/null; '
+                    'settings put global verifier_verify_adb_installs 0 2>/dev/null'],
+                    timeout=5, capture_output=True, creationflags=flags)
+                _ab_check = subprocess.run([adb, '-s', s, 'shell',
+                    'settings get global auto_blocker_enabled 2>/dev/null; '
+                    'settings get secure samsung_auto_blocker 2>/dev/null'],
+                    capture_output=True, text=True, timeout=3, creationflags=flags).stdout.strip()
+                if '1' not in _ab_check or not _ab_check:
+                    break
+                time.sleep(0.5)
             def _install_apk():
                 for i, args in enumerate([
                     [adb, '-s', s, 'install', '-r', '-d', apk],
@@ -5032,7 +6640,10 @@ class MdmKingApp:
                 self.log(f'    {part_name} [{perm}]', 'i')
                 # For param partition: try known byte offsets
                 if part_type == 'param':
-                    for offset in ['0x3FFE00','0x3FFDF0','0x3FFE50','0x3FFE80','0x3FFE08','0x3FFE20']:
+                    for offset in ['0x3FFE00','0x3FFDF0','0x3FFE50','0x3FFE80','0x3FFE08','0x3FFE20',
+                                   '0x3FFD00','0x3FFD50','0x3FFDA0','0x3FFE40','0x3FFE60','0x3FFEA0',
+                                   '0x3FFEC0','0x3FFEE0','0x3FFF00','0x3FFF20','0x3FFF40','0x3FFF60',
+                                   '0x3FFF80','0x3FFFA0','0x3FFFC0','0x3FFFE0']:
                         r = subprocess.run([adb, '-s', s, 'shell', f'dd if={pdev} bs=1 skip=$(({offset})) count=1 2>/dev/null | xxd -p'], capture_output=True, text=True, timeout=5, creationflags=flags)
                         val = r.stdout.strip()
                         if not val: continue
@@ -5780,9 +7391,13 @@ class MdmKingApp:
 
                 done = [False]
                 self._enqueue_ui(animate)
-                p.wait()
+                p.wait(timeout=120)
                 time.sleep(1.5)
                 done[0] = True
+            except subprocess.TimeoutExpired:
+                self.log('KG fix EXE timed out after 120s — killing', 'e')
+                try: p.kill()
+                except Exception: pass
             except Exception as e:
                 self.log('Error: ' + str(e), 'e')
 
@@ -6021,7 +7636,7 @@ class MdmKingApp:
         if proc and proc.poll() is None:
             try: proc.kill()
             except Exception: pass
-        subprocess.run(['taskkill', '/F', '/IM', 'adb.exe'], capture_output=True)
+        subprocess.run(['taskkill', '/F', '/IM', 'adb.exe'], capture_output=True, timeout=10)
         self.log('Cancelled', 'w')
         if hasattr(self, '_prog_frame'):
             self.root.after(0, lambda: self._finish_progress(False, 'CANCELLED'))
@@ -7222,15 +8837,8 @@ class MdmKingApp:
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('UNIVERSAL', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'],
                 disable_pkgs=True, quiet=False)
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'Universal bypass error: {_e}', 'e')
             import traceback as _tb
@@ -7242,7 +8850,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, 'UNIVERSAL BYPASS OLD COMPLETE'))
             self.root.after(0, lambda: self.status_var.set('Done — Universal Bypass Old complete'))
 
@@ -7275,15 +8883,8 @@ class MdmKingApp:
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core(brand, packages + ['com.android.vending'],
                 disable_pkgs=True, quiet=False)
-            self._show_flow_step('Send preloader', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Process data', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Check Lock', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Remove mdm', 'ok')
-            time.sleep(1)
-            self._show_flow_step('Disable OTA Update', 'ok')
+            self._show_flow_step('Post-bypass cleanup', 'ok')
+            self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
             self.log(f'{brand} IT Admin error: {_e}', 'e')
         finally:
@@ -7292,7 +8893,7 @@ class MdmKingApp:
                 except Exception: pass
                 try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
                 except Exception: pass
-                time.sleep(3)
+                time.sleep(0.3)
             self.root.after(0, lambda: self._finish_progress(True, f'{brand} IT ADMIN BYPASS COMPLETE'))
             self.root.after(0, lambda: self.status_var.set(f'Done — {brand} IT admin bypass complete'))
 
@@ -7329,6 +8930,9 @@ if __name__ == "__main__":
         sys.exit(0)
     if len(sys.argv) > 2 and sys.argv[1] == '--patch-worker':
         _sub_patch_worker(sys.argv[2])
+        sys.exit(0)
+    if len(sys.argv) > 2 and sys.argv[1] == '--spd-patch-worker':
+        _spd_subprocess_worker(sys.argv[2])
         sys.exit(0)
     set_version(APP_VERSION)
     mark_clean()
@@ -8339,7 +9943,19 @@ if __name__ == "__main__":
         login_win.geometry(f'1200x650+{(sw-1200)//2}+{(sh-650)//2}')
         login_win.minsize(1100, 580)
         login_win.title('MDM KING v' + APP_VERSION)
-        MdmKingApp(login_win); login_win.mainloop()
+        try:
+            MdmKingApp(login_win)
+        except Exception as _e:
+            import traceback
+            _log_path = os.path.join(tempfile.gettempdir(), 'mdm_king_crash.log')
+            with open(_log_path, 'w') as _f:
+                _f.write(f'FATAL: MdmKingApp init failed: {_e}\n')
+                traceback.print_exc(file=_f)
+            # Rebuild login form so user can try again
+            login_win.deiconify()
+            _build_login_form()
+            return
+        login_win.mainloop()
     
     # Bottom row: update check
     bottom_row = tk.Frame(login_win, bg=COLORS['bg'])
@@ -8489,109 +10105,3 @@ if __name__ == "__main__":
     login_win.protocol('WM_DELETE_WINDOW', lambda: os._exit(0))
     login_win.grab_set()
     login_win.mainloop()
-
-def inject_relock_props(path, file_size, pats, reps, log_fn=None):
-    """Find build.prop / default.prop / system.prop inside an image and inject
-    anti-relock overrides. Also adds the overrides to pats/reps so any existing
-    '=1' variants get neutralised by first-byte-repeat during the scan.
-    Standalone (no self) so the subprocess worker can call it."""
-    _log = log_fn or (lambda m, l='i': None)
-    _prop_overrides = [
-        b'persist.sys.mdm=0',
-        b'persist.sys.oobe.devicelock=0',
-        b'persist.sys.oobe=0',
-        b'persist.sys.oobe_complete=0',
-        b'persist.sys.sim_locked=0',
-        b'persist.sys.recovery_mode=0',
-        b'persist.vendor.recovery.mode=0',
-        b'persist.sys.mdm=0',
-        b'persist.sys.phoenix=0',
-        b'ro.phoenix=0',
-        b'ro.transecurity=0',
-        b'persist.sys.trancritical=0',
-        b'ro.transsion.mdm=0',
-        b'persist.vendor.transsion.mdm=0',
-        b'ro.vendor.transsion.mdm=0',
-        b'persist.vendor.transecurity=0',
-        b'persist.sys.tne=0',
-        b'ro.tne=0',
-        b'ro.cota=0',
-        b'persist.sys.cota=0',
-        b'ro.simlock.onekey=0',
-        b'persist.vendor.mdm=0',
-        b'persist.vendor.sec=0',
-        b'persist.vendor.lock=0',
-        b'persist.vendor.sys.mdm=0',
-        b'persist.vendor.sys.security=0',
-        b'persist.security.knox=0',
-        b'persist.sys.securitycom=0',
-        b'persist.sys.knox=0',
-        b'persist.vendor.knox=0',
-        b'ro.spd.lock=0',
-        b'persist.sys.spd.lock=0',
-        b'ro.mdm.enabled=0',
-        b'ro.secfle.deviceowner=0',
-        b'ro.knox.enhanced=0',
-    ]
-    _prop_files = [b'build.prop', b'default.prop', b'system.prop', b'vendor.prop', b'product.prop']
-    try:
-        _prop_ranges = []
-        with open(path, 'rb') as f:
-            off = 0
-            _chk = 4 * 1024 * 1024
-            while off < file_size:
-                f.seek(off)
-                data = f.read(_chk + max(len(p) for p in _prop_files))
-                if not data: break
-                for pf in _prop_files:
-                    idx = 0
-                    while True:
-                        pos = data.find(pf, idx)
-                        if pos < 0: break
-                        _start = data.rfind(b'\n', max(0, pos - 4096), pos)
-                        if _start < 0: _start = max(0, pos - 4096)
-                        _end = data.find(b'\x00', _start + 1)
-                        if _end < 0: _end = min(pos + 8192, len(data))
-                        _eoc = data.find(b'\n\n', pos, min(pos + 8192, len(data)))
-                        if _eoc > 0: _end = _eoc
-                        _abs_start = off + _start
-                        _abs_end = off + _end
-                        if _abs_end - _abs_start > 256:
-                            _prop_ranges.append((_abs_start, _abs_end))
-                        idx = pos + 1
-                off += _chk
-        if not _prop_ranges:
-            _log('[*] No prop files found for relock injection', 'i')
-            return
-        _prop_ranges.sort()
-        _merged = [_prop_ranges[0]]
-        for r in _prop_ranges[1:]:
-            if r[0] <= _merged[-1][1] + 4096:
-                _merged[-1] = (_merged[-1][0], max(_merged[-1][1], r[1]))
-            else:
-                _merged.append(r)
-        _log(f'[*] Prop files: {len(_merged)} blocks found for relock injection', 'i')
-        _override_bytes = b'\n' + b'\n'.join(_prop_overrides) + b'\n'
-        with open(path, 'r+b') as f:
-            for ps, pe in _merged:
-                f.seek(ps)
-                _buf = f.read(min(pe - ps, 131072))
-                _zero_run = _buf.find(b'\x00' * 512)
-                if _zero_run >= 0:
-                    _inject_at = ps + _zero_run
-                    _inject_len = min(len(_override_bytes), 512)
-                    f.seek(_inject_at)
-                    f.write(_override_bytes[:_inject_len])
-                    _log(f'  -> Injected {_inject_len}B relock overrides at 0x{_inject_at:x}', 'i')
-                elif pe + len(_override_bytes) < file_size - 1024:
-                    f.seek(pe)
-                    f.write(_override_bytes)
-                    _log(f'  -> Appended {len(_override_bytes)}B relock overrides at 0x{pe:x}', 'i')
-        for _ov in _prop_overrides:
-            if _ov not in pats:
-                pats.append(_ov)
-                reps.append(_ov[0:1] + _ov[0:1] * (len(_ov) - 1))
-        _log(f'[+] Injected {len(_prop_overrides)} anti-relock prop overrides', 's')
-    except Exception as _ei:
-        _log(f'[!] Prop inject: {_ei}', 'o')
-
