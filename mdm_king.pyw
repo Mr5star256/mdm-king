@@ -3441,7 +3441,7 @@ class MdmKingApp:
                 subprocess.run([adb, 'start-server'], timeout=10, capture_output=True)
                 time.sleep(2)
         if not raw.strip():
-            self._fl_fail('Device not responding — check USB connection')
+            self.log('[-] Device not responding — check USB connection', 'e')
             return None
         p = {}
         for line in raw.split('\n'):
@@ -3472,25 +3472,22 @@ class MdmKingApp:
         country = g('persist.sys.country', 'ro.csc.countryiso') or ''
         country_str = f'{country},{country}' if country else ''
 
-        # ── Device Connected header ──
-        self._fl_hdr('Device Connected:')
-        self._fl_done(f'Check Device State:........✔')
-
-        # ── Device properties (each line different color) ──
-        self._fl_val(f'Model Name:{g("ro.product.model")}')
-        self._fl_blue(f'Device Name:{g("ro.product.device")}')
-        self._fl_yellow(f'Serial:{g("ro.serialno", "sys.serialnumber")}')
-        self._fl_pink(f'Manufacture:{g("ro.product.manufacturer", "ro.product.brand")}')
-        self._fl_purple(f'Platform:{g("ro.chipname", "ro.board.platform", "ro.soc.model")}')
-        self._fl_val(f'Android Version:{g("ro.build.version.release")}')
-        self._fl_blue(f'Sdk Version:{g("ro.build.version.sdk")}')
-        self._fl_yellow(f'Timezone:{g("persist.sys.timezone")}')
-        self._fl_pink(f'Firmware Version:{g("ro.build.display.id")}')
-        self._fl_purple(f'Build Id:{g("ro.build.id")}')
-        self._fl_val(f'Security Patch:{g("ro.build.version.security_patch")}')
-        self._fl_blue(f'Country:{country_str}')
-        self._fl_yellow(f'Network Type:{net_str}')
-        self._fl('')
+        # ── Device properties ──
+        self.log('[#] ━━━━━ DEVICE INFORMATION ━━━━━━━━━━━━━━━━━━━━━', 'c')
+        self.log(f'[+] Model        : {g("ro.product.model")}', 's')
+        self.log(f'[+] Device       : {g("ro.product.device")}', 's')
+        self.log(f'[+] Serial       : {g("ro.serialno", "sys.serialnumber")}', 's')
+        self.log(f'[+] Manufacturer  : {g("ro.product.manufacturer", "ro.product.brand")}', 's')
+        self.log(f'[+] Platform     : {g("ro.chipname", "ro.board.platform", "ro.soc.model")}', 's')
+        self.log(f'[+] Android      : {g("ro.build.version.release")}', 's')
+        self.log(f'[+] SDK          : {g("ro.build.version.sdk")}', 's')
+        self.log(f'[+] Timezone     : {g("persist.sys.timezone")}', 's')
+        self.log(f'[+] Firmware     : {g("ro.build.display.id")}', 's')
+        self.log(f'[+] Build ID     : {g("ro.build.id")}', 's')
+        self.log(f'[+] Security     : {g("ro.build.version.security_patch")}', 's')
+        self.log(f'[+] Country      : {country_str}', 's')
+        self.log(f'[+] Network      : {net_str}', 's')
+        self.log('', '')
         return {'g': g, 'sh': sh, 'p': p, 's': s}
 
     def _show_flow_step(self, label, status='ok'):
@@ -5558,8 +5555,7 @@ class MdmKingApp:
             mem = gx('dumpsys meminfo 2>/dev/null | grep -i "total ram:" | head -1')
             if mem: cs.append(('💿', 'RAM', mem.split(':')[1].strip() if ':' in mem else mem, None))
             self._show_flow_info(adb, s, flags)
-            self._fl('Data Processing: DO NOT DISCONNECT DEVICE', 'fl_warn')
-            self._fl('')
+            self.log('[!] Data Processing: DO NOT DISCONNECT DEVICE', 'w')
             # Keep phone awake + prevent lock during bypass
             for _wakeline in [
                 'svc power stayon true 2>/dev/null',
@@ -6543,7 +6539,7 @@ class MdmKingApp:
             time.sleep(3)
             r = subprocess.run([adb, '-s', s, 'shell', 'settings get secure enabled_accessibility_services'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'MyAccessibilityService' in r.stdout: self.log_ok('HyperCore protection active - device secured')
-            else: self._fl_warn('Protection layer incomplete - manual check advised')
+            else: self.log('[!] Protection layer incomplete - manual check advised', 'w')
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 1 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             # Disable all known lock packages for Samsung + common
             for pkg in CHIPSET_PACKAGES['samsung'] + CHIPSET_PACKAGES['common']:
@@ -6589,7 +6585,7 @@ class MdmKingApp:
                          'settings put secure kg_disable 1']:
                 subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
             # KG status manipulation — multiple rootless methods
-            self.log('  Manipulating KG state to Checking...', 'i')
+            self.log('[*] Manipulating KG state to Checking...', 'h')
             # Method A: Set persist properties
             for prop in ['persist.sys.kg.state', 'persist.sys.kg', 'persist.security.kg',
                           'sys.kg.status', 'ro.security.kg.status', 'sys.knox.kgstate',
@@ -6673,7 +6669,7 @@ class MdmKingApp:
                         except Exception: pass
                     subprocess.run([adb, '-s', s, 'shell', f'rm -f {tmp}'], timeout=5, capture_output=True, creationflags=flags)
             # Method F: Force KG daemon to reload state (if any are still alive)
-            self.log('  [F] Forcing KG state reload...', 'i')
+            self.log('[*] Forcing KG state reload...', 'h')
             subprocess.run([adb, '-s', s, 'shell', 'killall -HUP knoxguard kgclient kgagent 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             # Final: Re-set all KG properties after all manipulation attempts
             for prop in ['persist.sys.kg.state', 'persist.sys.kg', 'persist.security.kg',
@@ -6697,7 +6693,7 @@ class MdmKingApp:
             # Block OTA FOTA path
             subprocess.run([adb, '-s', s, 'shell', 'rm -rf /cache/fota 2>/dev/null; mkdir -p /cache/fota 2>/dev/null; chmod 0000 /cache/fota 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put global fota_disable 1 2>/dev/null; settings put global ota_disable 1 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            self.log('  KG client removed, status set to checking', 's')
+            self.log('[+] KG client removed, status set to checking', 's')
             # Apply relock prevention
             self._samsung_hardening()
             # Show completion
@@ -8559,7 +8555,7 @@ class MdmKingApp:
             if os.path.isfile(p): adb = p; break
         r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
         devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
-        if not devs: self._fl_fail('No device found'); return
+        if not devs: self.log('[-] No device found', 'e'); return
         s = devs[0]
         self.log('[#] ━━━━━ FACTORY RESET ━━━━━━━━━━━━━━━━━━━━━━━━━', 'h')
         self.log('[!] WARNING: This will wipe all device data!', 'w')
