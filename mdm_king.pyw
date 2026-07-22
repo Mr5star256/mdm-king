@@ -5160,75 +5160,10 @@ class MdmKingApp:
 
     def _online_miscdata_patch(self):
         if not self._ensure_active(): return
-        path = filedialog.askopenfilename(title='Select dumped miscdata or proinfo .bin file',
-            filetypes=[('Binary dump', '*.bin'), ('All files', '*.*')])
-        if not path: return
-        self.root.after(0, lambda: self.log_text.delete('1.0', tk.END))
-        self.log_section('ONLINE PATCH', 2)
-        _bn = os.path.basename(path)
-        _fsize = os.path.getsize(path)
-        self.log(f'File: {_bn} ({_fsize} bytes)', 'i')
-        _name_lower = _bn.lower()
-        if 'proinfo' in _name_lower:
-            _idx = '1'
-        elif 'miscdata' in _name_lower or 'misc' in _name_lower:
-            _idx = '2'
-        else:
-            self.log('Could not detect partition type from filename, trying miscdata', 'w')
-            _idx = '2'
-        self.log('Uploading file to server for patching...', 'i')
-        self._enqueue_ui(lambda: self.root.update())
-        _tmp = os.path.join(tempfile.gettempdir(), f'mdm_online_{int(time.time())}.bin')
-        try:
-            _boundary = '----' + hashlib.md5(str(time.time()).encode()).hexdigest()
-            _body = b''
-            # selectedIndex field
-            _body += f'--{_boundary}\r\nContent-Disposition: form-data; name="selectedIndex"\r\n\r\n{_idx}\r\n'.encode()
-            # file field
-            with open(path, 'rb') as f: _fdata = f.read()
-            _body += f'--{_boundary}\r\nContent-Disposition: form-data; name="file"; filename="{os.path.basename(path)}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
-            _body += _fdata
-            _body += f'\r\n--{_boundary}--\r\n'.encode()
-            _parsed = urllib.parse.urlparse('https://remove.mdmfile.com/bin/')
-            _conn = http.client.HTTPSConnection(_parsed.netloc, timeout=60)
-            _conn.request('POST', _parsed.path or '/', body=_body,
-                headers={'Content-Type': f'multipart/form-data; boundary={_boundary}',
-                         'User-Agent': 'MDM-King/2.0'})
-            _resp = _conn.getresponse()
-            _raw = _resp.read()
-            _resp_data = json.loads(_raw.decode('utf-8'))
-            _conn.close()
-            if not _resp_data.get('download'):
-                _logs = _resp_data.get('logs', [])
-                for _l in _logs: self.log(_l, 'w')
-                self.log('Server did not return a download link', 'e'); return
-            _dl_url = _resp_data['download']
-            if _dl_url.startswith('/'): _dl_url = 'https://remove.mdmfile.com' + _dl_url
-            self.log('Downloading patched binary from server...', 'i')
-            _req2 = urllib.request.Request(_dl_url, headers={'User-Agent': 'MDM-King/2.0'})
-            with urllib.request.urlopen(_req2, timeout=30) as _resp2:
-                _dl_data = _resp2.read()
-            if not _dl_data or len(_dl_data) < 64:
-                self.log(f'Server returned invalid data ({len(_dl_data)} bytes)', 'e'); return
-            self.log(f'Downloaded {len(_dl_data)} bytes from server', 's')
-            with open(_tmp, 'wb') as f: f.write(_dl_data)
-            _bak = os.path.splitext(path)[0] + '_backup.bin'
-            if not os.path.isfile(_bak):
-                with open(_bak, 'wb') as f:
-                    with open(path, 'rb') as _src: f.write(_src.read())
-                self.log(f'Backup saved: {os.path.basename(_bak)}', 's')
-            with open(path, 'wb') as f: f.write(_dl_data)
-            self.log_ok(f'Online patch applied — {os.path.basename(path)} replaced with server version')
-            self.log('Flash this file back using TSM/Pandora Partition Manager', 'i')
-        except urllib.error.HTTPError as _he:
-            self.log(f'Server error: {_he.code} {_he.reason}', 'e')
-        except urllib.error.URLError as _ue:
-            self.log(f'Network error: {_ue.reason}', 'e')
-        except Exception as _e:
-            self.log(f'Online patch failed: {_e}', 'e')
-        finally:
-            try: os.remove(_tmp)
-            except Exception: pass
+        import webbrowser
+        webbrowser.open('https://remove.mdmfile.com/bin/')
+        self.log('Opened online patcher in browser — upload your .bin there and download the patched file', 'i')
+        self.log('After patching, flash the file back using Partition Manager', 'i')
 
     def nokia_tool(self):
         self.log('Nokia Tool', 'c')
