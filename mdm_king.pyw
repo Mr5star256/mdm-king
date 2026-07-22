@@ -6696,9 +6696,12 @@ class MdmKingApp:
             self.log('[+] KG client removed, status set to checking', 's')
             # Apply relock prevention
             self._samsung_hardening()
-            # Show completion
+            # Reboot device
+            self.log('[*] Rebooting device...', 'h')
+            subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=flags)
             self.log('[#] ━━━━━ BYPASS COMPLETE ━━━━━━━━━━━━━━━━━━━━━', 'c')
-            self.log('[✓] Disable airplane mode and connect online', 's')
+            self.log('[✓] Device rebooting — wait for it to come back online', 's')
             self.log('[!] If device still locked, run bypass again', 'w')
         except Exception as _e:
             self.log(f'[-] Bypass error: {_e}', 'e')
