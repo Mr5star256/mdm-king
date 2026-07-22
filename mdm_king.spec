@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+# Built: 2026-07-22
 
 a = Analysis(
     ['mdm_king.pyw'],
@@ -31,7 +31,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MDM KING v0.3.8',
+    name='MDM KING v0.3.9',
     icon='tools/mdm_king_logo.ico',
     debug=False,
     bootloader_ignore_signals=False,
@@ -45,4 +45,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">'
+             '<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">'
+             '<security>'
+             '<requestedPrivileges>'
+             '<requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>'
+             '</requestedPrivileges>'
+             '</security>'
+             '</trustInfo>'
+             '</assembly>',
 )

