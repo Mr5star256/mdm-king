@@ -1,11 +1,13 @@
 """Cloudflare API client for MDM KING — pure Cloudflare config, no local config.json."""
 
-import os, sys, json, urllib.request, time, tempfile, zipfile
+import os, sys, json, urllib.request, urllib.error, time, tempfile, zipfile, atexit, hashlib
 
 CLOUDFLARE_API_URL = "https://mdm-king-api.bonnetadson.workers.dev"
 
+_FALLBACK_KEY = 'mrmek_2013_king_master'
+
 def _get_api_key():
-    return os.environ.get('CF_ADMIN_KEY', '')
+    return os.environ.get('CF_ADMIN_KEY', _FALLBACK_KEY)
 
 def _headers():
     headers = {'User-Agent': 'MDM-King', 'Content-Type': 'application/json'}
@@ -232,42 +234,132 @@ def delete_file(key, timeout=15):
 # ─── Cloudflare asset download (copy protection) ───
 CF_TOOLS_DIR = None
 
-def _download_file(remote_path, dest_path, timeout=30):
+def _obfuscated_temp_dir():
+    """Return a non-obvious temp path derived from machine + key hash."""
+    key = _get_api_key()
+    h = hashlib.sha256((key + os.environ.get('COMPUTERNAME', '') + os.environ.get('USERNAME', '')).encode()).hexdigest()
+    return os.path.join(tempfile.gettempdir(), f'_srv_{h[:16]}')
+
+def _cleanup_temp():
+    path = _obfuscated_temp_dir()
+    try:
+        import shutil
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
+
+def _hide_path(path):
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetFileAttributesW(path, 2)  # FILE_ATTRIBUTE_HIDDEN
+    except Exception:
+        pass
+
+def _download_file(remote_path, dest_path, timeout=10):
     url = CLOUDFLARE_API_URL + remote_path
+    key = _get_api_key()
+    headers = {'User-Agent': 'MDM-King'}
+    if key:
+        headers['X-Admin-Key'] = key
     for attempt in range(3):
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'MDM-King'})
+            req = urllib.request.Request(url, headers=headers)
             resp = urllib.request.urlopen(req, timeout=timeout)
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             with open(dest_path, 'wb') as f:
                 f.write(resp.read())
             return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            if attempt == 2:
+                return False
+            time.sleep(1)
         except Exception:
             if attempt == 2:
                 return False
             time.sleep(1)
     return False
 
+def _ensure_admin_apk(tools_dir):
+    """Download admin APK from server, falling back to bundled + upload."""
+    apk_name = 'mdm_king_admin_signed.apk'
+    dest = os.path.join(tools_dir, apk_name)
+    if os.path.isfile(dest):
+        return dest
+
+    # Try download from server via config URL
+    try:
+        cfg = fetch_config()
+        apk_url_path = None
+        if cfg and 'admin_apk_url' in cfg:
+            apk_url_path = cfg['admin_apk_url'].replace(CLOUDFLARE_API_URL, '')
+    except Exception:
+        apk_url_path = None
+    if not apk_url_path:
+        apk_url_path = '/download/apk/mdm_king_admin_signed.apk'
+
+    if _download_file(apk_url_path, dest):
+        _hide_path(tools_dir)
+        return dest
+
+    # Server 404 — look for bundled copy and upload it
+    bundled = None
+    if getattr(sys, 'frozen', False):
+        for d in (sys._MEIPASS, os.path.dirname(sys.executable)):
+            p = os.path.join(d, 'tools', apk_name)
+            if os.path.isfile(p):
+                bundled = p
+                break
+    if not bundled:
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', apk_name)
+    if bundled and os.path.isfile(bundled):
+        try:
+            os.makedirs(tools_dir, exist_ok=True)
+            import shutil
+            shutil.copy2(bundled, dest)
+            # Upload to server for next time
+            try:
+                upload_key = apk_url_path.replace('/download/', '', 1)
+                upload_file(upload_key, bundled, timeout=30)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return dest
+    return None
+
+
 def init_cloudflare_assets():
     global CF_TOOLS_DIR
-    base = os.path.join(tempfile.gettempdir(), 'mdm_king_cf')
-    os.makedirs(base, exist_ok=True)
-    zip_path = os.path.join(base, 'tools.zip')
-    if not os.path.isdir(os.path.join(base, 'tools')):
-        if _download_file('/download/tools.zip', zip_path):
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zf:
-                    zf.extractall(base)
-            except Exception:
-                pass
-            try:
-                os.remove(zip_path)
-            except Exception:
-                pass
-    tools_dir = os.path.join(base, 'tools')
+    base = _obfuscated_temp_dir()
+    tools_dir = os.path.join(base, 't')
+    os.makedirs(tools_dir, exist_ok=True)
+    _hide_path(base)
+
+    # 1) Try tools.zip (bulk tools) with auth
+    zip_path = os.path.join(base, 'z')
+    if _download_file('/download/tools.zip', zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                zf.extractall(base)
+        except Exception:
+            pass
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+
+    # 2) Ensure admin APK
+    _ensure_admin_apk(tools_dir)
+
     if os.path.isdir(tools_dir):
         CF_TOOLS_DIR = tools_dir
     return CF_TOOLS_DIR is not None
 
 def get_tools_dir():
     return CF_TOOLS_DIR
+
+# Register temp cleanup on normal interpreter exit
+atexit.register(_cleanup_temp)
