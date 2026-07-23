@@ -7002,41 +7002,95 @@ class MdmKingApp:
                      'sec_store_daemon', 'knox_tad', 'knox_fido_agent']:
             subprocess.run([adb, '-s', s, 'shell', f'killall -9 {proc} 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
-        # 13. Make iptables persistent (restore on boot)
-        self.log('Making iptables rules persistent...', 'i')
-        try:
-            persist_script = (
-                '#!/system/bin/sh\n'
-                'sleep 30\n'
-                'iptables -A OUTPUT -m string --string "knox" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "samsungdm" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "samsungknox" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "findmymobile" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "kgclient" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "knoxguard" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "klmsagent" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "omadm" --algo bm -j DROP\n'
-                'iptables -A OUTPUT -m string --string "fota" --algo bm -j DROP\n'
-                'ip6tables -A OUTPUT -m string --string "knox" --algo bm -j DROP\n'
-                'ip6tables -A OUTPUT -m string --string "samsungdm" --algo bm -j DROP\n'
-                'ip6tables -A OUTPUT -m string --string "samsungknox" --algo bm -j DROP\n'
-                'ip6tables -A OUTPUT -m string --string "kgclient" --algo bm -j DROP\n'
-                'ip6tables -A OUTPUT -m string --string "knoxguard" --algo bm -j DROP\n'
-                'am force-stop com.samsung.android.kgclient\n'
-                'am force-stop com.samsung.android.knox.attestation\n'
-                'killall -9 kgclient 2>/dev/null\n'
-                'killall -9 knoxguard 2>/dev/null\n'
-            )
-            subprocess.run([adb, '-s', s, 'shell', f'echo \'{persist_script}\' > /data/local/tmp/iptables_restore.sh 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'shell', 'chmod 755 /data/local/tmp/iptables_restore.sh 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
-            # Try to register as boot script via multiple methods
-            for init_cmd in [
-                'settings put global boot_restore_script /data/local/tmp/iptables_restore.sh',
-                'setprop persist.sys.boot.script /data/local/tmp/iptables_restore.sh',
-            ]:
-                subprocess.run([adb, '-s', s, 'shell', init_cmd], timeout=3, capture_output=True, creationflags=flags)
-        except Exception:
-            pass
+        # 13. device_config namespace overrides (survive reboot on Android 12+)
+        self.log('Disabling Knox via device_config namespaces...', 'i')
+        _ns = [
+            ('knox', ['knox_enabled', 'kg_enabled', 'kg_service_enabled', 'knox_service_enabled',
+                      'knox_guard_enabled', 'guard_enabled', 'attestation_enabled',
+                      'cloudmdm_enabled', 'policydm_enabled', 'samsungdm_enabled',
+                      'knox_analytics_enabled', 'knox_setup_wizard_enabled',
+                      'fota_enabled', 'omadm_enabled', 'samsung_push_enabled',
+                      'knox_license_enabled', 'knox_container_enabled',
+                      'knox_enterprise_enabled', 'knox_zt_enabled',
+                      'knox_hardened_enabled', 'knox_proca_enabled', 'knox_five_enabled',
+                      'knox_kpec_enabled', 'knox_express_enabled',
+                      'kg2026_enabled', 'kg_daemon_enabled']),
+            ('samsung_knox', ['enabled', 'service_enabled', 'guard_enabled',
+                              'kg_enabled', 'findmymobile_enabled']),
+        ]
+        _wflags = flags  # preserve CREATE_NO_WINDOW flag
+        for _ns_name, _ns_flags in _ns:
+            for _flag in _ns_flags:
+                subprocess.run([adb, '-s', s, 'shell',
+                    f'device_config put {_ns_name} {_flag} false 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=_wflags)
+                subprocess.run([adb, '-s', s, 'shell',
+                    f'device_config put {_ns_name} {_flag} 0 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=_wflags)
+        # Also set via device_config namespace "persist" override
+        for _pflag in ['knox_enabled', 'kg_enabled', 'samsung_knox_enabled',
+                       'knox_service_enabled', 'knox_guard_enabled']:
+            subprocess.run([adb, '-s', s, 'shell',
+                f'device_config put persist.sys.{_pflag} 0 2>/dev/null'],
+                timeout=3, capture_output=True, creationflags=flags)
+
+        # 14. Persist Knox-disable sysprops (some survive on Exynos/Snapdragon bootloaders)
+        self.log('Setting persist Knox-disable sysprops...', 'i')
+        for prop in [
+            'persist.sys.knox.enabled', 'persist.sys.knox.guard',
+            'persist.sys.knox.kg', 'persist.sys.knox.attestation',
+            'persist.sys.knox.cloudmdm', 'persist.sys.knox.policydm',
+            'persist.sys.knox.fota', 'persist.sys.knox.omadm',
+            'persist.sys.knox.hardened', 'persist.sys.knox.proca',
+            'persist.sys.knox.five', 'persist.sys.knox.express',
+            'persist.sys.knox.container', 'persist.sys.knox.enterprise',
+            'persist.sys.knox.zt', 'persist.sys.knox.analytics',
+        ]:
+            subprocess.run([adb, '-s', s, 'shell',
+                f'setprop {prop} 0 2>/dev/null; setprop {prop} false 2>/dev/null'],
+                timeout=2, capture_output=True, creationflags=flags)
+
+        # 15. Direct Knox content provider manipulation
+        self.log('Directly writing to Knox content providers...', 'i')
+        for uri, bind in [
+            ('content://com.samsung.android.knox.provider.KnoxStatus',
+             '--bind name:s:kg_state --bind value:s:checking'),
+            ('content://com.samsung.android.knox.provider.KnoxStatus',
+             '--bind name:s:guard_state --bind value:s:disabled'),
+            ('content://com.samsung.android.knox.provider.KnoxStatus',
+             '--bind name:s:knox_enabled --bind value:s:false'),
+            ('content://com.samsung.android.knox.provider.KnoxPolicy',
+             '--bind name:s:mdm_enforcement --bind value:s:disabled'),
+            ('content://com.samsung.android.kgclient.provider.KGStatus',
+             '--bind name:s:kg_state --bind value:s:checking'),
+            ('content://com.samsung.android.kgclient.provider.KGStatus',
+             '--bind name:s:server_url --bind value:s:https://localhost'),
+        ]:
+            subprocess.run([adb, '-s', s, 'shell',
+                f'content insert --uri {uri} {bind} 2>/dev/null'],
+                timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                f'content update --uri {uri} {bind} 2>/dev/null'],
+                timeout=3, capture_output=True, creationflags=flags)
+
+        # 16. Force Knox services into disabled state via cmd
+        self.log('Disabling Knox services via cmd...', 'i')
+        for _cmd in ['cmd knox disable 2>/dev/null',
+                      'cmd knox guard_disable 2>/dev/null',
+                      'cmd knox attestation_disable 2>/dev/null',
+                      'cmd knox cloudmdm_disable 2>/dev/null',
+                      'cmd device_policy set-knox-state disabled 2>/dev/null']:
+            subprocess.run([adb, '-s', s, 'shell', _cmd],
+                timeout=3, capture_output=True, creationflags=flags)
+
+        # 17. Block Google Device Policy + Knox via VPN-style hostname redirect
+        self.log('Blocking Knox DNS via hostname redirect...', 'i')
+        subprocess.run([adb, '-s', s, 'shell',
+            'settings put global captive_portal_server localhost 2>/dev/null; '
+            'settings put global captive_portal_https_url https://localhost 2>/dev/null; '
+            'settings put global captive_portal_http_url http://localhost 2>/dev/null; '
+            'settings put global ntp_server 127.0.0.1 2>/dev/null'],
+            timeout=3, capture_output=True, creationflags=flags)
 
         self.log_ok('Hardening complete — relock should be prevented')
 
@@ -7424,6 +7478,9 @@ class MdmKingApp:
             self._samsung_hardening()
             self._enqueue_ui(lambda: self._update_progress(2, 3, '...', 'done'))
             self._enqueue_ui(lambda: self._finish_progress(True, 'SAMSUNG 2023 BYPASS COMPLETE'))
+            self.log('[*] Rebooting device...', 'h')
+            subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         finally:
             self._block_close = False
     
@@ -8543,8 +8600,11 @@ class MdmKingApp:
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:skip_first_use_hint --bind value:s:1 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:frp_lock --bind value:s:0 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'dd if=/dev/zero of=/dev/block/by-name/frp bs=1024 count=8 2>/dev/null'], timeout=5, creationflags=flags)
+        self.log('[*] Rebooting device...', 'h')
+        subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=flags)
         self.log('[#] ━━━━━ BYPASS COMPLETE ━━━━━━━━━━━━━━━━━━━━━', 'c')
-        self.log('[✓] FRP bypass complete — reboot device', 's')
+        self.log('[✓] Device rebooting — wait for it to come back online', 's')
 
     def _adb_factory_reset(self):
         self.log_section('ADB Factory Reset', 2)
