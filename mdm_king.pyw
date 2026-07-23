@@ -132,7 +132,7 @@ def _asset(*args):
         if os.path.exists(parent):
             return parent
         return None
-    base = os.path.dirname(os.path.abspath(__file__))
+    base = os.path.dirname(os.path.abspath(__file__ or sys.argv[0]))
     full = os.path.join(base, path)
     if os.path.exists(full):
         return full
@@ -582,6 +582,232 @@ MDM_PATTERNS = [
     b'bg6m_permissions.xml',
     b'sprd_mdm_permissions.xml',
     b'com.unisoc.mdm.xml',
+    # ─── FSTAB ENTRIES (CRITICAL: re-enable dm-verity/lock at boot) ───
+    # fstab files that contain verity/enable Encryption settings
+    b'/fstab.', b'fstab.', b'/vendor/etc/fstab.',
+    b'/system/etc/fstab.', b'/product/etc/fstab.',
+    b'fileencryption=', b'fileencryption=',
+    b'forceencrypt=', b'forceencrypt=1',
+    b'metadata_encryption=', b'metadata_encryption=',
+    b'contextfs=', b'contextfs=',
+    b'avb_keys=', b'avb_sys_keys=',
+    b'verity_keyid=', b'verity_device=',
+    # fstab options that ENABLE verity/lock
+    b'wait=,check', b'wait=,verify', b'wait=,avb',
+    b'encryptable=', b'encryptable=1',
+    b'noatime,nosuid,nodev',  # common fstab mount flags that can contain verity
+    b'resid=dm-1', b'resid=dm-2',  # DM device residual IDs from previous verity mappings
+    # ─── INIT RC TRIGGER PATTERNS (re-enable lock daemons at boot) ───
+    # Boot-completed triggers that start lock daemons
+    b'on property:persist.sys.mdm=1',
+    b'on property:persist.sys.mdm=true',
+    b'on property:persist.sys.oobe.devicelock=1',
+    b'on property:persist.sys.oobe.complete=1',
+    b'on property:sys.boot_completed=1',
+    b'on property:sys.user.0.ce_available=1',
+    # OEM unlock/block triggers
+    b'on property:sys.oem.unlock_allowed=0',
+    b'on property:persist.sys.oem.locked=1',
+    b'on property:ro.oem_unlock_supported=0',
+    # Device provisioning triggers
+    b'on property:setup.complete=true',
+    b'on property:dev.bootcomplete=1',
+    # Recovery/factory reset triggers
+    b'on property:sys.factory_mode=1',
+    b'on property:persist.sys.factoryreset=1',
+    b'trigger oobe', b'trigger factory_reset',
+    # Lock re-arm triggers (Phoenix/Transsion mechanism)
+    b'on property:persist.sys.phoenix.active=1',
+    b'on property:persist.sys.trancritical=1',
+    b'on property:ro.phoenix=1',
+    # Samsung Knox re-lock triggers
+    b'on property:persist.security.knox=1',
+    b'on property:sys.knox.state=1',
+    b'on property:ro.boot.flash.locked=1',
+    # ─── SELINUX POLICY PATTERNS (allow daemon to access /data/system) ───
+    b'allow mdm_daemon { data_system_file',
+    b'allow mdm_daemon { data_app_file',
+    b'allow mdm_daemon { system_data_file',
+    b'allow scp_securityd { data_file',
+    b'allow scorpio_domain {', b'transecurity_domain {',
+    b'deny mdm_daemon {', b'deny scp_securityd {',
+    b'allow mdm_daemon system_data_file:dir {',
+    b'allow mdm_daemon system_data_file:file {',
+    b'allow mdm_daemon apk_data_file:file {',
+    b'allow { mdm_daemon scp_securityd', b'allow { scorpio_domain transecurity_domain',
+    b'# allow mdm_daemon', b'# allow scp_securityd',
+    # ─── KNOX / SECURITY CONTENT PROVIDER PATTERNS (re-lock via CP) ───
+    b'com.samsung.android.knox.containeragent',
+    b'com.samsung.android.knox.containerlib',
+    b'com.samsung.android.knox.knoxtool',
+    b'com.samsung.knox.enterprise.knoxsetupwizard',
+    b'com.samsung.knox.knoxatte',
+    b'com.samsung.knox.knoxmds',
+    b'com.samsung.knox.knoxcustomizationservice',
+    b'com.samsung.knox.knoxvpn',
+    b'com.samsung.knox.smms',
+    b'KnoxContainerAgent', b'KnoxAttestationAgent',
+    b'content://com.samsung.android.knox.container.provider',
+    b'content://com.samsung.knox.provider/container',
+    b'com.samsung.knox.permission.KNOX_CONTAINER_MANAGER',
+    b'com.samsung.knox.KNOX_AGENT_PERMISSION',
+    b'com.samsung.android.knox.kmms',
+    b'android.permission.MANAGE_KNOX',
+    b'com.samsung.android.knox.permission.KNOX_SDP',
+    # Knox device admin (re-enables policy after bypass)
+    b'com.samsung.android.securityknoxservice',
+    b'com.samsung.knox.fips',
+    b'com.samsung.knox.knoxstatenotifier',
+    b'com.sec.enterprise.knox.knoxlwp',
+    # Samsung MDM/Knox packages in product/vendor partitions
+    b'/product/priv-app/KnoxSetupWizard/',
+    b'/product/priv-app/KnoxContainerAgent/',
+    b'/product/priv-app/KnoxMDS/',
+    b'/product/priv-app/KnoxSMS/',
+    b'/vendor/priv-app/KnoxTSA/',
+    b'KnoxSetupWizard', b'KnoxMDS', b'KnoxSMS', b'KnoxContainerAgent',
+    b'SamsungKnox', b'SamsungKnox.apk',
+    # ─── DEVICE_CONFIG NAMESPACE PATTERNS (survive reboot on A12+) ───
+    b'device_config put security auto_blocker_enabled',
+    b'auto_blocker_enabled=true',
+    b'auto_blocker_enabled=1',
+    b'device_config put security mdm_enforcement_enabled',
+    b'mdm_enforcement_enabled=true',
+    b'device_config put security device_policy_manager',
+    b'device_config put global oem_lock_enabled',
+    b'device_config put global device_policy_enabled',
+    b'device_config put system device_lock_enabled',
+    b'device_config put system oobe_complete',
+    b'user_setup_complete=0',
+    # ─── ENCRYPTION / METADATA ENCRYPTION PATTERNS ───
+    b'ro.crypto.state=encrypted', b'ro.crypto.state=unencrypted',
+    b'ro.crypto.type=file', b'ro.crypto.type=metadata',
+    b'ro.crypto.fs_type=ext4',
+    b'persist.sys.crypto.type=file',
+    b'persist.vold.encrypt_progress=0',
+    b'vold.decrypt=trigger_restart_framework',
+    b'ro.setupwizard.locked=1',
+    b'ro.setupwizard.locked=true',
+    # DE (Device Encryption) flags
+    b'block_dev=/dev/block/by-id',
+    b'/dev/block/mapper/',
+    b'dm-crypt', b'dm-verity',
+    b'mapper/', b'crypt',
+    # ─── OEM LOCK / BOOTLOADER PATTERNS (not bootloader-readable, but init-readable) ───
+    b'persist.sys.oem.lock.status=1',
+    b'persist.sys.oem.lock.status=true',
+    b'persist.sys.frp.lock=1',
+    b'persist.vendor.oemunlockstatus=0',
+    b'persist.oem.unlock.enabled=0',
+    # Anti-rollback / version downgrading (prevents downgrade of security fix)
+    b'persist.sys.version.downgrade=1',
+    b'ro.product.version.downgrade=1',
+    b'persist.security.rollback.version=',
+    b'antirollback=1', b'antirollback=true',
+    b'verification_mode=enforcing',
+    # ─── EXTRA SERVICE STARTUP PATTERNS ───
+    b'start itel_security', b'start itel_mdmd',
+    b'start transsion_mdmd', b'start tran_mdmd',
+    b'exec_background /vendor/bin/scorpiod',
+    b'exec_background /vendor/bin/trancriticalparavfy',
+    b'exec u:object_r:mdmd:s0',
+    # ─── SELINUX TYPE ATTRIBUTES (prevent daemon from running) ───
+    b'type mdm_daemon', b'typeattribute mdm_daemon',
+    b'type scp_securityd', b'typeattribute scp_securityd',
+    b'type scorpio_domain', b'typeattribute scorpio_domain',
+    b'type transecurity_domain', b'typeattribute transecurity_domain',
+    b'type phoenix_domain', b'typeattribute phoenix_domain',
+    b'type safecenter_daemon', b'typeattribute safecenter_daemon',
+    b'type bg6m_lock_domain', b'typeattribute bg6m_lock_domain',
+    b'type trancritical_domain', b'typeattribute trancritical_domain',
+    # ─── FILE-CONTEXT PATTERNS (.contexts / seapp_contexts) ───
+    b'u:object_r:mdmd_exec:s0',
+    b'u:object_r:scorpio_exec:s0',
+    b'u:object_r:phoenix_exec:s0',
+    b'u:object_r:safecenter_exec:s0',
+    b'u:object_r:transecurity_exec:s0',
+    b'service_name=mdmd', b'service_name=scorpiod',
+    b'service_name=phoenixd', b'service_name=safecenter',
+    # ─── BOOT IMAGE HEADER PATTERNS (Android boot.img header fields) ───
+    # kernel cmdline in boot.img header (beyond the patched cmdline string)
+    b'androidboot.selinux=enforcing',
+    b'androidboot.verifiedbootstate=green',
+    b'androidboot.veritymode=enforcing',
+    b'verify=1',
+    b'androidboot.dm_verity_logging=1',
+    b'androidboot.forceencrypt=1',
+    b'androidboot.locktype=pin', b'androidboot.locktype=pattern',
+    b'skip_initramfs',
+    b'bootdevice=', b'bootdevice=/by-name/',
+    # Kernel cmdline in vendor boot / init_boot images (A/B devices)
+    b'vendor_bootimage.androidboot.',
+    b'androidboot.init_boot_cached=',
+    b'init_boot_cached=true',
+    # ─── RECOVERY MODE PATTERNS (lock daemon starts in recovery) ───
+    b'on class_start trigger_display_on',
+    b'on property:sys.recovery=1',
+    b'persist.sys.in.recovery=1',
+    # ─── SUPER PARTITION METADATA (AVB footer / LVM super) ───
+    b'androidboot.super_partition=',
+    b'slot-select=',
+    b'logical:',
+    b'/dev/block/mapper/logical_',
+    # ─── DEVICE-SPECIFIC LOCK PATTERNS ───
+    # Xiaomi
+    b'com.xiaomi.mdm', b'com.xiaomi.security',
+    b'com.miui.securitycenter',
+    b'com.miui.device',
+    b'MiuiSecurityCenter.apk',
+    b'com.xiaomi.finddevice',
+    # OPPO/Realme
+    b'com.oppo.mdm', b'com.oppo.security',
+    b'com.coloros.oppoguardelf',
+    b'com.coloros.securepay',
+    b'com.heytap.mcs',
+    # Vivo
+    b'com.vivo.mdm', b'com.vivo.abe',
+    b'com.vivo.securemanager',
+    b'com.vivo.abe.frameworkservices',
+    b'com.iqoo.device',
+    # Huawei/Honor
+    b'com.huawei.systemmanager',
+    b'com.huawei.trustzone',
+    b'com.huawei.knoxservice',
+    b'com.huawei.powermanager',
+    b'com.huawei.HwID',
+    # Realme specific
+    b'com.heytap.finddevice', b'com.heytap.safety',
+    b'com.coloros.finddevice',
+    # Generic FRP bypass protection
+    b'frp_state=', b'frp_persistent=',
+    b'persist.sys.frp.active=1',
+    b'ro.setupwizard.mode=',
+    # Additional Phoenix variants (2026 Transsion)
+    b'com.transsion.phoenixserver',
+    b'com.transsion.phoenixassist',
+    b'phoenixassist', b'phoenixserver',
+    b'Phoenix.apk', b'phoenix.apk',
+    b'/product/priv-app/PhoenixServer/',
+    # Additional 2026 Transsion lock patterns
+    b'com.transsion.tranlog', b'tranlog.service',
+    b'com.transsion.tnevservice', b'tnevservice',
+    b'com.transsion.trancriticalparavfy',
+    b'tranlog', b'tnevservice',
+    b'/vendor/bin/tranlog', b'/vendor/bin/tnevservice',
+    b'service tranlog', b'service tnevservice',
+    # Persist lock state properties (persist.vendor.* that survive wipe)
+    b'persist.vendor.lock.state=1',
+    b'persist.vendor.lock.state=true',
+    b'persist.vendor.lock.status=1',
+    b'persist.vendor.lock.enabled=1',
+    b'persist.vendor.security.active=1',
+    b'persist.vendor.mdmd.active=1',
+    b'persist.sys.enterprise.devicelock=1',
+    # Locked bootloader indicator (init reads, not bootloader)
+    b'ro.boot.flash.locked=1',
+    b'ro.boot.locked=1',
+    b'ro.boot.secure=1',
+    b'persist.sys.boot.locked=1',
     # ─── DEX METHOD SIGNATURES (NOP lock-check bytecode in framework) ───
     b'Lcom/transsion/security/LockConfig;->isLocked',
     b'Lcom/transsion/security/LockConfig;->enforceLock',
@@ -1416,6 +1642,63 @@ def inject_relock_props(path, file_size, pats, reps, log_fn=None):
         b'ro.mdm.enabled=0',
         b'ro.secfle.deviceowner=0',
         b'ro.knox.enhanced=0',
+        # NEW: Encryption/FRP overrides
+        b'persist.sys.crypto.type=file',
+        b'ro.crypto.state=unencrypted',
+        b'ro.crypto.type=',
+        b'persist.vold.encrypt_progress=0',
+        b'ro.setupwizard.mode=DISABLED',
+        b'persist.sys.frp.active=0',
+        b'frp_state=0',
+        # NEW: Knox / device admin overrides (prevent re-enable)
+        b'persist.security.knox=0',
+        b'persist.sys.knox.state=0',
+        b'persist.sys.knox.container=0',
+        b'persist.sys.knox.sdp.enabled=0',
+        # NEW: OEM lock state overrides
+        b'persist.sys.oem.lock.status=0',
+        b'persist.vendor.oemunlockstatus=1',
+        b'persist.oem.unlock.enabled=1',
+        b'persist.sys.frp.lock=0',
+        b'persist.vendor.lock.state=0',
+        b'persist.vendor.lock.status=0',
+        b'persist.vendor.lock.enabled=0',
+        b'persist.vendor.security.active=0',
+        b'persist.vendor.mdmd.active=0',
+        b'persist.sys.enterprise.devicelock=0',
+        # NEW: Boot verification overrides
+        b'ro.boot.verifiedbootstate=orange',
+        b'ro.boot.vbmeta.device_state=unlocked',
+        b'ro.boot.flash.locked=0',
+        b'ro.boot.locked=0',
+        b'ro.boot.secure=0',
+        b'persist.sys.boot.locked=0',
+        # NEW: Anti-rollback/downgrade overrides
+        b'antirollback=0',
+        b'verification_mode=disabled',
+        b'persist.sys.version.downgrade=0',
+        b'ro.product.version.downgrade=0',
+        # NEW: Device-config namespace overrides (A12+ survive-reboot)
+        b'auto_blocker_enabled=false',
+        b'auto_blocker_enabled=0',
+        b'mdm_enforcement_enabled=false',
+        b'device_policy_enabled=false',
+        b'user_setup_complete=1',
+        b'persist.sys.device_provisioned=1',
+        b'persist.sys.device_owner=0',
+        # NEW: Transsion 2026 lock overrides
+        b'persist.sys.tranlog=0',
+        b'persist.sys.tnevservice=0',
+        b'persist.vendor.tranlog=0',
+        b'persist.vendor.tnevservice=0',
+        b'persist.vendor.trancritical=0',
+        b'persist.sys.phoenix.active=0',
+        b'persist.sys.trancritical.active=0',
+        # NEW: fstab/persistent overrides
+        b'fileencryption=',
+        b'forceencrypt=0',
+        b'encryptable=0',
+        b'metadata_encryption=',
         # Provisioned flags (READ from build.prop/default.prop by the framework) —
         # marking the device already provisioned stops the setup wizard from
         # re-running OEM lock/MDM provisioning at first boot.
@@ -1423,6 +1706,17 @@ def inject_relock_props(path, file_size, pats, reps, log_fn=None):
         b'user_setup_complete=1',
         b'ro.setupwizard.mode=DISABLED',
         b'setup_wizard_completed=1',
+        # NEW: Samsung Knox overrides
+        b'persist.security.knox.sdp=0',
+        b'persist.sys.knox.tsa.enabled=0',
+        b'persist.sys.knox.container.enabled=0',
+        # NEW: Generic MDM enforcement overrides
+        b'persist.sys.mdm.enforce=0',
+        b'persist.sys.mdm.active=0',
+        b'persist.sys.mdm.lock=0',
+        b'persist.sys.security.active=0',
+        b'persist.sys.safecenter.active=0',
+        b'persist.sys.safecenter.enabled=0',
     ]
     # ── Disable persistent Device-Admin / MDM system apps (the "re-locks after a few
     #    minutes / reboot hides it temporarily" vector). These apps re-arm via a
@@ -1461,6 +1755,40 @@ def inject_relock_props(path, file_size, pats, reps, log_fn=None):
         b'com.sprd.mdm', b'com.sprd.security', b'com.spreadtrum.mdm',
         b'com.unisoc.mdm', b'com.unisoc.security', b'com.unisoc.lock',
         b'com.android.mdm', b'com.spreadtrum.security',
+        # ── Samsung Knox MDM (re-enables via KnoxContainerAgent/content provider) ──
+        b'com.samsung.android.knox.containeragent',
+        b'com.samsung.android.knox.containerlib',
+        b'com.samsung.knox.enterprise.knoxsetupwizard',
+        b'com.samsung.knox.knoxatte',
+        b'com.samsung.knox.knoxmds',
+        b'com.samsung.android.securityknoxservice',
+        b'com.samsung.knox.fips',
+        b'com.samsung.knox.knoxstatenotifier',
+        b'com.sec.enterprise.knox.knoxlwp',
+        b'com.samsung.android.knox.kmms',
+        b'KnoxSetupWizard', b'KnoxContainerAgent', b'KnoxMDS', b'KnoxSMS',
+        # ── Xiaomi / Redmi / POCO MDM ──
+        b'com.xiaomi.mdm', b'com.xiaomi.security',
+        b'com.miui.securitycenter', b'com.miui.device',
+        b'com.xiaomi.finddevice', b'com.miui.guardprovider',
+        b'com.miui.powerkeeper',
+        b'MiuiSecurityCenter', b'XiaomiSecurityCenter',
+        # ── OPPO / ColorOS MDM ──
+        b'com.oppo.mdm', b'com.oppo.security',
+        b'com.coloros.oppoguardelf', b'com.coloros.securepay',
+        b'com.heytap.mcs', b'com.heytap.safety',
+        b'com.heytap.finddevice', b'com.coloros.finddevice',
+        b'ColorOSSecurityCenter',
+        # ── Vivo / Funtouch OS MDM ──
+        b'com.vivo.mdm', b'com.vivo.abe',
+        b'com.vivo.securemanager', b'com.vivo.abe.frameworkservices',
+        b'com.iqoo.device',
+        # ── Huawei / Honor MDM ──
+        b'com.huawei.systemmanager', b'com.huawei.trustzone',
+        b'com.huawei.knoxservice', b'com.huawei.powermanager',
+        b'com.huawei.HwID', b'com.huawei.appmarket',
+        # ── Realme (uses OPPO/ColorOS base) ──
+        b'com.realme.security', b'com.realme.mtm',
     ]
     # Also mangle any package whose name CONTAINS these substrings (catches unknown
     # OEM-specific variants without enumerating each one).
@@ -1469,6 +1797,15 @@ def inject_relock_props(path, file_size, pats, reps, log_fn=None):
         b'transecurity', b'trancritical', b'phoenix', b'phasecheck',
         b'uniber', b'tne', b'cota', b'bg6m', b'spd_lock', b'spd.mdm',
         b'unisoc.lock', b'unisoc.mdm', b'DeviceManager',
+        b'knox', b'KnoxContainer', b'knoxmds',
+        b'xiaomi.mdm', b'miui.security', b'guardprovider',
+        b'oppo.mdm', b'coloros.security', b'coloros.guard',
+        b'vivo.mdm', b'vivo.abe', b'vivo.secure',
+        b'huawei.system', b'huawei.knox', b'hiad.system',
+        b'realme.security', b'realme.mtm',
+        b'transsion.mdm', b'transsion.lock',
+        b'phoenixserver', b'phoenixassist',
+        b'tranlog', b'tnevservice', b'tranlogservice',
     ]
     try:
         _CHK = 8 * 1024 * 1024
@@ -1670,7 +2007,7 @@ def _patch_loop_worker(param_path):
     try:
         for _nu in ['http://8.8.8.8', 'http://1.1.1.1', 'http://google.com']:
             try:
-                urllib.request.urlopen(_nu, timeout=3)
+                with urllib.request.urlopen(_nu, timeout=3): pass
                 break
             except Exception: continue
         else:
@@ -1680,7 +2017,7 @@ def _patch_loop_worker(param_path):
         try:
             _auth_req = urllib.request.Request("https://mdm-king-api.bonnetadson.workers.dev/api/health",
                 headers={'User-Agent': 'MDM-King'})
-            urllib.request.urlopen(_auth_req, timeout=10)
+            with urllib.request.urlopen(_auth_req, timeout=10): pass
         except Exception:
             result = {'status': 'error', 'error': 'Cannot reach server — patching requires online access'}
             with open(param_path + '.result', 'w') as f: json.dump(result, f)
@@ -1803,9 +2140,26 @@ def _patch_boot_cmdline(file_path, _log):
                         _log(f'[+] Cmdline: verifiedbootstate {_old}->{_new}', 's')
                         break
                 _off += 1
-            # Patch verify flags
-            for _p, _r in [(b'verify=1', b'verify=0'),
-                           (b'androidboot.veritymode=enforcing', b'androidboot.veritymode=eio')]:
+            # Patch verify / relock / encryption cmdline flags (androidboot.* read by init, NOT bootloader)
+            for _p, _r in [
+                (b'verify=1',          b'verify=0'),
+                (b'verify=true',       b'verify=false'),
+                (b'androidboot.veritymode=enforcing', b'androidboot.veritymode=eio'),
+                (b'veritymode=enforcing',              b'veritymode=eio'),
+                (b'veritymode= enforcing',             b'veritymode=eio'),
+                (b'veritymode=',        b'veritymode=eio'),
+                (b'androidboot.dm_verity_logging=1',    b'androidboot.dm_verity_logging=0'),
+                (b'dm_verity_logging=1',               b'dm_verity_logging=0'),
+                (b'androidboot.forceencrypt=1',         b'androidboot.forceencrypt=0'),
+                (b'androidboot.force_safemode=1',       b'androidboot.force_safemode=0'),
+                (b'skip_initramfs',                    b'skip_initramfs'),
+                (b'androidboot.selinux=enforcing',     b'androidboot.selinux=permissive'),
+                (b'selinux=1',                        b'selinux=0'),
+                (b'enforcing=1',                      b'enforcing=0'),
+                (b'androidboot.locktype=pin',          b'androidboot.locktype=none'),
+                (b'androidboot.locktype=pattern',      b'androidboot.locktype=none'),
+                (b'androidboot.verifiedbootstate=green', b'androidboot.verifiedbootstate=orange'),
+            ]:
                 _off = 0
                 while True:
                     _off = _data.find(_p, _off)
@@ -1873,7 +2227,7 @@ def _zero_avb_magic(file_path, _log):
 def _make_disable_vbmeta(out_path, _log):
     """Create a minimal vbmeta image with DISABLE_VERITY flag using avbtool."""
     try:
-        _base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        _base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__ or sys.argv[0])))
         _avb_path = os.path.join(_base, 'avbtool.py')
         if not os.path.isfile(_avb_path):
             _log('[!] avbtool.py not found, cannot create disable-verity vbmeta', 'w')
@@ -2695,8 +3049,8 @@ class RemoteAlgorithmEngine:
                 req = urllib.request.Request(self._url, headers={
                     'User-Agent': 'MDM-King'
                 })
-                resp = urllib.request.urlopen(req, timeout=timeout)
-                raw = json.loads(resp.read().decode('utf-8'))
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = json.loads(resp.read().decode('utf-8'))
                 source = None
                 if 'files' in raw:
                     for fname, finfo in raw['files'].items():
@@ -4587,7 +4941,7 @@ class MdmKingApp:
             _net_ok = False
             for _nu in ['http://8.8.8.8', 'http://1.1.1.1', 'http://google.com']:
                 try:
-                    urllib.request.urlopen(_nu, timeout=3)
+                    with urllib.request.urlopen(_nu, timeout=3): pass
                     _net_ok = True
                     break
                 except Exception: continue
@@ -4628,19 +4982,28 @@ class MdmKingApp:
 
             _trace_log('WORKER_LAUNCH')
             import subprocess as _sp
+            _self_path = os.path.abspath(sys.argv[0]) if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
             if getattr(sys, 'frozen', False):
                 _worker_cmd = [sys.executable, '--patch-worker', _tmp]
             else:
                 _py = sys.executable or 'python'
                 if _py and _py.lower().endswith('pythonw.exe'):
                     _py = _py[:-5] + 'python.exe'
-                _worker_cmd = [_py, os.path.abspath(__file__), '--patch-worker', _tmp]
-            _proc = _sp.Popen(
-                _worker_cmd,
-                stdout=_sp.PIPE, stderr=_sp.STDOUT,
-                text=True, bufsize=1, encoding='utf-8',
-                creationflags=0x08000000 if sys.platform == 'win32' else 0
-            )
+                _worker_cmd = [_py, _self_path, '--patch-worker', _tmp]
+            _si = _sp.STARTUPINFO()
+            _si.dwFlags = _sp.STARTF_USESHOWWINDOW
+            _si.wShowWindow = 0  # SW_HIDE
+            try:
+                _proc = _sp.Popen(
+                    _worker_cmd,
+                    stdin=_sp.DEVNULL, stdout=_sp.PIPE, stderr=_sp.STDOUT,
+                    text=True, bufsize=1, encoding='utf-8',
+                    startupinfo=_si,
+                    creationflags=0x08000000 if sys.platform == 'win32' else 0
+                )
+            except OSError as _e:
+                _trace_log(f'WORKER_SPAWN_ERR {_e}')
+                raise RuntimeError(f'Failed to spawn worker: {_e}')
             import queue as _qu
             _line_q = _qu.Queue()
             def _read_worker():
@@ -4805,15 +5168,24 @@ class MdmKingApp:
 
         try:
             import subprocess as _sp
+            _self_path = os.path.abspath(sys.argv[0]) if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
             if getattr(sys, 'frozen', False):
                 _cmd = [sys.executable, '--spd-patch-worker', _tmp]
             else:
                 _py = sys.executable or 'python'
                 if _py and _py.lower().endswith('pythonw.exe'):
                     _py = _py[:-5] + 'python.exe'
-                _cmd = [_py, os.path.abspath(__file__), '--spd-patch-worker', _tmp]
-            _proc = _sp.Popen(_cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-                              creationflags=0x08000000 if sys.platform == 'win32' else 0)
+                _cmd = [_py, _self_path, '--spd-patch-worker', _tmp]
+            _si = _sp.STARTUPINFO()
+            _si.dwFlags = _sp.STARTF_USESHOWWINDOW
+            _si.wShowWindow = 0
+            try:
+                _proc = _sp.Popen(_cmd, stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                                  startupinfo=_si,
+                                  creationflags=0x08000000 if sys.platform == 'win32' else 0)
+            except OSError as _e:
+                _trace_log(f'SPD_WORKER_SPAWN_ERR {_e}')
+                raise RuntimeError(f'Failed to spawn SPD worker: {_e}')
 
             _deadline = _time.monotonic() + 3600
             _last_log = ''
@@ -6386,7 +6758,7 @@ class MdmKingApp:
             if kg_proc: _kg_dbg.append(f'procs={len(kg_proc.strip().split(chr(10)))}')
         except Exception: pass
         try:
-            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'kg_debug.log'), 'a') as _f:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__ or sys.argv[0])), 'kg_debug.log'), 'a') as _f:
                 _f.write(f'[{datetime.datetime.now().isoformat()}] KG={current_kg or "unknown"} | {" ".join(_kg_dbg)}\n')
         except Exception: pass
 
@@ -6562,18 +6934,28 @@ class MdmKingApp:
                          'killall -9 knoxprocess2 2>/dev/null', 'killall -9 knox_tad2 2>/dev/null',
                          'killall -9 knox_fido_agent2 2>/dev/null']:
                 subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
-            # Remove kgclient as device admin first (critical for full removal)
-            subprocess.run([adb, '-s', s, 'shell',
-                'dpm remove-active-admin com.samsung.android.kgclient/.MyDeviceAdminReceiver 2>/dev/null'],
-                timeout=5, capture_output=True, creationflags=flags)
-            # Remove kgclient package entirely (incl. 2026 module name)
+            # Neutralize kgclient WITHOUT triggering Samsung detection (8133/3001)
+            # WARNING: pm disable-user triggers Error 8133, pm clear triggers Error 3001
+            # Force-stop + appops deny + am set-inactive are safe
             for kg_pkg in ['com.samsung.android.kgclient', 'com.samsung.android.kgclient.module']:
-                subprocess.run([adb, '-s', s, 'shell', f'pm uninstall --user 0 {kg_pkg} 2>/dev/null'],
+                subprocess.run([adb, '-s', s, 'shell',
+                    f'am set-inactive {kg_pkg} true 2>/dev/null; '
+                    f'am kill {kg_pkg} 2>/dev/null; '
+                    f'am crash {kg_pkg} 2>/dev/null; '
+                    f'am stop-app {kg_pkg} 2>/dev/null; '
+                    f'killall -9 kgclient 2>/dev/null; '
+                    f'killall -9 kgclient_v2 2>/dev/null'],
                     timeout=5, capture_output=True, creationflags=flags)
-                subprocess.run([adb, '-s', s, 'shell', f'pm disable-user --user 0 {kg_pkg} 2>/dev/null'],
+                subprocess.run([adb, '-s', s, 'shell',
+                    f'cmd appops set {kg_pkg} RUN_IN_BACKGROUND deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} RUN_ANY_IN_BACKGROUND deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} WAKE_LOCK deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} INTERNET deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} POST_NOTIFICATION deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} SCHEDULE_EXACT_ALARM deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} SYSTEM_EXEMPT_FROM_DISMISSIBLE_NOTIFICATIONS deny 2>/dev/null; '
+                    f'cmd appops set {kg_pkg} ACCESS_RESTRICTED_SETTINGS deny 2>/dev/null'],
                     timeout=5, capture_output=True, creationflags=flags)
-                subprocess.run([adb, '-s', s, 'shell', f'pm hide {kg_pkg} 2>/dev/null'],
-                    timeout=3, capture_output=True, creationflags=flags)
             # Clear all KG settings
             for cmd in ['settings delete global knox_guard_status',
                          'settings delete secure knox_guard_status',
@@ -6873,11 +7255,26 @@ class MdmKingApp:
                 pkg = line.split(':')[1].strip()
                 if pkg == 'com.mdmking.admin': continue
                 if any(k in pkg.lower() for k in knox_keywords):
-                    subprocess.run([adb, '-s', s, 'shell',
-                        f'pm disable-user --user 0 {pkg} 2>/dev/null; '
-                        f'pm clear {pkg} 2>/dev/null'],
-                        timeout=5, capture_output=True, creationflags=flags)
-                    subprocess.run([adb, '-s', s, 'shell', f'appops set {pkg} INTERNET deny 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+                    # Skip pm disable-user/clear on kgclient (triggers Error 8133/3001)
+                    if 'kgclient' in pkg.lower():
+                        subprocess.run([adb, '-s', s, 'shell',
+                            f'am set-inactive {pkg} true 2>/dev/null; '
+                            f'am kill {pkg} 2>/dev/null; '
+                            f'am crash {pkg} 2>/dev/null; '
+                            f'am stop-app {pkg} 2>/dev/null; '
+                            f'killall -9 kgclient 2>/dev/null; '
+                            f'cmd appops set {pkg} RUN_IN_BACKGROUND deny 2>/dev/null; '
+                            f'cmd appops set {pkg} RUN_ANY_IN_BACKGROUND deny 2>/dev/null; '
+                            f'cmd appops set {pkg} WAKE_LOCK deny 2>/dev/null; '
+                            f'cmd appops set {pkg} INTERNET deny 2>/dev/null; '
+                            f'cmd appops set {pkg} SCHEDULE_EXACT_ALARM deny 2>/dev/null'],
+                            timeout=5, capture_output=True, creationflags=flags)
+                    else:
+                        subprocess.run([adb, '-s', s, 'shell',
+                            f'pm disable-user --user 0 {pkg} 2>/dev/null; '
+                            f'pm clear {pkg} 2>/dev/null'],
+                            timeout=5, capture_output=True, creationflags=flags)
+                        subprocess.run([adb, '-s', s, 'shell', f'appops set {pkg} INTERNET deny 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 6. Block OMA-DM carrier provisioning (settings + disable services)
         self.log('Blocking OMA-DM carrier provisioning...', 'i')
@@ -7161,7 +7558,7 @@ class MdmKingApp:
             qr.add_data(qr_str)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
-            qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'samsung_qr_provision.png')
+            qr_path = _asset('samsung_qr_provision.png')
             img.save(qr_path)
             pil_img = Image.open(qr_path).resize((230, 230), Image.LANCZOS)
             tk_img = ImageTk.PhotoImage(pil_img)
@@ -7357,9 +7754,12 @@ class MdmKingApp:
         try:
             if not self._ensure_active(): return
             import ctypes
-            if not ctypes.windll.shell32.IsUserAnAdmin():
-                self.log('Run as Administrator first!', 'e')
-                return
+            try:
+                if not ctypes.windll.shell32.IsUserAnAdmin():
+                    self.log('Run as Administrator first!', 'e')
+                    return
+            except Exception:
+                self.log('Admin check failed — continuing anyway', 'w')
             tools = self._tools_dir()
             self._enqueue_ui(lambda: self.log_text.delete('1.0', tk.END))
             self.log_section('MDM KING IS PROCESSING', 2)
@@ -7388,7 +7788,6 @@ class MdmKingApp:
             self.log('Running tool...', 'i')
             try:
                 import ctypes, time
-                from ctypes import wintypes
                 user32 = ctypes.windll.user32
                 SW_HIDE = 0
                 WM_SETTEXT = 0x000C
@@ -7400,18 +7799,26 @@ class MdmKingApp:
 
                 hwnd = None
                 for _ in range(60):
-                    hwnd = user32.FindWindowW(None, 'Password prompt')
+                    try: hwnd = user32.FindWindowW(None, 'Password prompt')
+                    except Exception: break
                     if hwnd:
-                        edit = user32.FindWindowExW(hwnd, None, 'Edit', None)
+                        try: edit = user32.FindWindowExW(hwnd, None, 'Edit', None)
+                        except Exception: edit = None
                         if edit:
-                            user32.SendMessageW(edit, WM_SETTEXT, 0, 'ROBYTECH1234')
-                        btn = user32.FindWindowExW(hwnd, None, 'Button', None)
+                            try: user32.SendMessageW(edit, WM_SETTEXT, 0, 'ROBYTECH1234')
+                            except Exception: pass
+                        try: btn = user32.FindWindowExW(hwnd, None, 'Button', None)
+                        except Exception: btn = None
                         if btn:
-                            btn_id = user32.GetDlgCtrlID(btn)
-                            user32.PostMessageW(hwnd, 0x0111, btn_id, 0)
+                            try:
+                                btn_id = user32.GetDlgCtrlID(btn)
+                                user32.PostMessageW(hwnd, 0x0111, btn_id, 0)
+                            except Exception: pass
                         else:
-                            user32.PostMessageW(hwnd, 0x0111, 1, 0)
-                        user32.ShowWindow(hwnd, SW_HIDE)
+                            try: user32.PostMessageW(hwnd, 0x0111, 1, 0)
+                            except Exception: pass
+                        try: user32.ShowWindow(hwnd, SW_HIDE)
+                        except Exception: pass
                         break
                     time.sleep(0.1)
 
@@ -7781,10 +8188,12 @@ class MdmKingApp:
         dpinst = os.path.join(driver_dir, 'DPInst64.exe' if '64' in arch else 'DPInst32.exe')
         if os.path.isfile(dpinst):
             self.log(f'Running: {dpinst} /se /sw', 'i')
-            ctypes.windll.shell32.ShellExecuteW(None, 'runas', dpinst, '/se /sw', None, 1)
+            try: ctypes.windll.shell32.ShellExecuteW(None, 'runas', dpinst, '/se /sw', None, 1)
+            except Exception as _e: self.log(f'Driver install error: {_e}', 'e')
         setup = os.path.join(driver_dir, 'DriverSetup.exe')
         if os.path.isfile(setup):
-            ctypes.windll.shell32.ShellExecuteW(None, 'runas', setup, '', None, 1)
+            try: ctypes.windll.shell32.ShellExecuteW(None, 'runas', setup, '', None, 1)
+            except Exception as _e: self.log(f'Driver setup error: {_e}', 'e')
         self.log('SPD driver install launched', 'i')
         messagebox.showinfo('Done', 'SPD driver installer launched with admin rights.\n\n'
             'Accept any UAC prompts that appear.\n'
@@ -9023,7 +9432,7 @@ def _require_internet():
     """Block startup if no internet — mandatory check."""
     for url in ['http://8.8.8.8', 'http://1.1.1.1', 'http://google.com']:
         try:
-            urllib.request.urlopen(url, timeout=3)
+            with urllib.request.urlopen(url, timeout=3): pass
             return True
         except Exception: continue
     return False
@@ -9043,7 +9452,8 @@ if __name__ == "__main__":
         import ctypes
         try:
             if not ctypes.windll.shell32.IsUserAnAdmin():
-                ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable, ' '.join(f'"{a}"' for a in sys.argv[1:]), None, 1)
+                ctypes.windll.shell32.ShellExecuteW(None, 'runas', sys.executable,
+                    ' '.join(f'"{a}"' for a in sys.argv[1:]), None, 1)
                 sys.exit(0)
         except Exception:
             pass
@@ -9063,7 +9473,11 @@ if __name__ == "__main__":
     if not any(getattr(_args, a, None) for a in ['part_patch', 'super_patch']):
         if not _require_internet():
             import ctypes
-            ctypes.windll.user32.MessageBoxW(0, 'Internet connection required.\nPlease connect to the internet and restart MDM KING.', 'MDM KING — No Internet', 0x10)
+            try:
+                ctypes.windll.user32.MessageBoxW(0, 'Internet connection required.\nPlease connect to the internet and restart MDM KING.', 'MDM KING — No Internet', 0x10)
+            except Exception:
+                print('Internet required. Please connect and restart.')
+            sys.exit(1)
             sys.exit(1)
 
     if _args.part_patch or _args.super_patch:
@@ -9341,8 +9755,8 @@ if __name__ == "__main__":
                 def _do_check():
                     try:
                         req = urllib.request.Request(VERSION_URL, headers={'User-Agent': 'MDM-King'})
-                        resp = urllib.request.urlopen(req, timeout=8)
-                        latest = resp.read().decode('utf-8').strip()
+                        with urllib.request.urlopen(req, timeout=8) as resp:
+                            latest = resp.read().decode('utf-8').strip()
                         if latest and _semver_gt(latest, APP_VERSION):
                             _update_latest[0] = latest
                     except Exception:
@@ -10110,18 +10524,18 @@ if __name__ == "__main__":
             try:
                 import urllib.request
                 req = urllib.request.Request(EXE_DOWNLOAD_URL, headers={'User-Agent': 'MDM-King'})
-                resp = urllib.request.urlopen(req, timeout=30)
-                total = int(resp.headers.get('Content-Length', 0))
-                downloaded = 0
-                with open(tmp, 'wb') as f:
-                    while True:
-                        chunk = resp.read(65536)
-                        if not chunk: break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total > 0:
-                            pct = int(downloaded / total * 100)
-                            login_win.after(0, lambda p=pct: prog.config(text=f'{p}%'))
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    total = int(resp.headers.get('Content-Length', 0))
+                    downloaded = 0
+                    with open(tmp, 'wb') as f:
+                        while True:
+                            chunk = resp.read(65536)
+                            if not chunk: break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                pct = int(downloaded / total * 100)
+                                login_win.after(0, lambda p=pct: prog.config(text=f'{p}%'))
                 if os.path.isfile(tmp) and os.path.getsize(tmp) >= 1000000:
                     _update_tmp[0] = tmp
                     login_win.after(0, lambda: (

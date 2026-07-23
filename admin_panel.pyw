@@ -11,7 +11,7 @@ from cloudflare import CLOUDFLARE_API_URL, fetch_config, update_config, get_user
 try:
     import ctypes
     ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
-except: pass
+except Exception: pass
 
 HERE = os.path.dirname(os.path.dirname(sys.executable)) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 LICENSE_DATA = os.path.join(HERE, 'license_data')
@@ -98,10 +98,10 @@ class AdminPanel:
                     from PIL import ImageTk
                     root._taskbar_icon = ImageTk.PhotoImage(file=png32)
                     root.iconphoto(True, root._taskbar_icon)
-                except:
+                except Exception:
                     root._taskbar_icon = tk.PhotoImage(file=png32)
                     root.iconphoto(True, root._taskbar_icon)
-        except: pass
+        except Exception: pass
 
         self._current_tab = 0
         self._tab_frames = []
@@ -341,7 +341,7 @@ class AdminPanel:
         try:
             for i in self.users_tree.get_children():
                 self.users_tree.delete(i)
-        except: return
+        except Exception: return
         cfg = load_cfg()
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
@@ -394,7 +394,7 @@ class AdminPanel:
         try:
             ico = os.path.join(HERE, 'tools', 'mdm_king_logo_circular.ico')
             if os.path.isfile(ico): win.iconbitmap(ico)
-        except: pass
+        except Exception: pass
         self.root.update_idletasks()
         px, py, pw, ph = self.root.winfo_x(), self.root.winfo_y(), self.root.winfo_width(), self.root.winfo_height()
         win.geometry(f'420x380+{px + pw//2 - 210}+{py + ph//2 - 190}')
@@ -466,7 +466,7 @@ class AdminPanel:
         try:
             ico = os.path.join(HERE, 'tools', 'mdm_king_logo_circular.ico')
             if os.path.isfile(ico): win.iconbitmap(ico)
-        except: pass
+        except Exception: pass
         self.root.update_idletasks()
         px, py, pw, ph = self.root.winfo_x(), self.root.winfo_y(), self.root.winfo_width(), self.root.winfo_height()
         win.geometry(f'380x240+{px + pw//2 - 190}+{py + ph//2 - 120}')
@@ -542,7 +542,7 @@ class AdminPanel:
         try:
             ico = os.path.join(HERE, 'tools', 'mdm_king_logo_circular.ico')
             if os.path.isfile(ico): dur_win.iconbitmap(ico)
-        except: pass
+        except Exception: pass
         self.root.update_idletasks()
         px, py, pw, ph = self.root.winfo_x(), self.root.winfo_y(), self.root.winfo_width(), self.root.winfo_height()
         dur_win.geometry(f'340x300+{px + pw//2 - 170}+{py + ph//2 - 150}')
@@ -626,7 +626,7 @@ class AdminPanel:
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(lic_key)
-            except: pass
+            except Exception: pass
             dur_win.destroy()
             self.refresh_users()
 
@@ -1003,7 +1003,7 @@ class AdminPanel:
                 line = line.strip()
                 if line and 'UUID' not in line:
                     hwid = line; break
-        except: hwid = 'unknown'
+        except Exception: hwid = 'unknown'
         tk.Label(mf, text=f'HWID: {hwid}', font=('Segoe UI', 9, 'bold'),
                  fg=ACCENT, bg=CARD).pack(anchor='w', pady=1)
 
@@ -1089,7 +1089,7 @@ class AdminPanel:
     def refresh_users(self):
         try:
             for i in self.users_tree.get_children(): self.users_tree.delete(i)
-        except: return
+        except Exception: return
         cfg = load_cfg()
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
@@ -1134,13 +1134,19 @@ class AdminPanel:
                 users.update(d1_users)
                 self._d1_emails = d1_emails
                 self.root.after(0, lambda: self._refresh_users_from_data(users, blocked_ids, blocked_hwids))
-        except Exception:
-            pass
+        except Exception as e:
+            # Show error to user but still update UI with local users
+            error_msg = f"Error fetching D1 users: {str(e)}"
+            print(error_msg)  # For debugging
+            self.root.after(0, lambda: (
+                self._refresh_users_from_data(users, blocked_ids, blocked_hwids),
+                tk.messagebox.showwarning("D1 Sync Error", error_msg)
+            ))
 
     def _refresh_users_from_data(self, users, blocked_ids, blocked_hwids):
         try:
             for i in self.users_tree.get_children(): self.users_tree.delete(i)
-        except: return
+        except Exception: return
         for email, data in sorted(users.items()):
             if not isinstance(data, dict): continue
             activated = data.get('activated', False)
@@ -1178,12 +1184,12 @@ class AdminPanel:
         pending = len(users) - active - blocked
         try:
             self._header_stats.config(text=f'{len(users)} users | {active} active | {pending} pending | {blocked} blocked')
-        except: pass
+        except Exception: pass
 
     def refresh_licenses(self):
         try:
             for i in self.lic_tree.get_children(): self.lic_tree.delete(i)
-        except: return
+        except Exception: return
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         blocked_ids = [b.get('lic_id', '') for b in blocklist if isinstance(b, dict)]
@@ -1199,7 +1205,7 @@ class AdminPanel:
     def refresh_blocklist(self):
         try:
             for i in self.bl_tree.get_children(): self.bl_tree.delete(i)
-        except: return
+        except Exception: return
         blocklist = _load_json(BLOCKLIST_PATH)
         if not isinstance(blocklist, list): blocklist = []
         for b in blocklist:
